@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vigilkit demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 32px 16px;
+        background: #0d1117;
+        color: #e6edf3;
+        font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+      }
+
+      header {
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      p.subtitle {
+        margin: 6px 0 0;
+        font-size: 12px;
+        color: #8b949e;
+      }
+
+      .stage {
+        width: 640px;
+        max-width: 100%;
+      }
+
+      canvas {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        display: block;
+      }
+
+      .controls {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+      }
+
+      button {
+        font: inherit;
+        font-size: 14px;
+        padding: 8px 20px;
+        border-radius: 6px;
+        border: 1px solid #30363d;
+        background: #21262d;
+        color: #e6edf3;
+        cursor: pointer;
+      }
+
+      button:hover:not(:disabled) {
+        border-color: #58a6ff;
+        color: #58a6ff;
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .readout {
+        width: 640px;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .readout div {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 8px 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .readout span {
+        color: #8b949e;
+      }
+
+      .readout .value {
+        color: #58a6ff;
+      }
+
+      #errors {
+        grid-column: 1 / -1;
+        white-space: normal;
+        word-break: break-all;
+        max-height: 96px;
+        overflow-y: auto;
+        color: #f85149;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>vigilkit demo</h1>
+      <p class="subtitle">WebCodecs FLV over WebSocket · FLV over WebSocket 实时播放</p>
+    </header>
+
+    <div class="stage">
+      <canvas id="screen" width="640" height="360"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="connect" type="button">Connect / 连接</button>
+      <button id="disconnect" type="button" disabled>Disconnect / 断开</button>
+    </div>
+
+    <div class="readout">
+      <div><span>status</span> <span class="value" id="status">idle</span></div>
+      <div><span>fps</span> <span class="value" id="fps">-</span></div>
+      <div><span>frames</span> <span class="value" id="frames">0</span></div>
+      <div id="errors"><span>errors</span></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "name": "@vigilkit/example-basic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "node server.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vigilkit": "workspace:*",
+    "@vigilkit/plugin-flv": "workspace:*",
+    "@vigilkit/plugin-ws": "workspace:*",
+    "@vigilkit/renderer": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "ws": "^8.18.0",
+    "@types/node": "^22.0.0"
+  }
+}

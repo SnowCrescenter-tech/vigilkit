@@ -1,0 +1,21 @@
+# Optional MediaMTX relay (NOT required for v0.1 QA).
+#
+# Purpose: feed RTSP/IP-camera streams to the browser via WHEP (WebRTC) or,
+# with a small shim, restream them over the websocket transport that this
+# example already speaks. This compose file is documentation-only: the basic
+# example streams a bundled FLV fixture over ws://.../live and never talks to
+# MediaMTX. It is provided so camera owners have a known-good relay to point
+# at once WHEP support lands (out of scope for v0.1).
+#
+# Usage:
+#   docker compose -f examples/basic/docker-compose.yml up -d mediamtx
+#
+# Then point an RTSP camera at rtsp://localhost:8554/<camera-name> and check
+# the stream via the API at http://localhost:8888 (paths list endpoints).
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    ports:
+      - "8554:8554" # RTSP (camera input)
+      - "8888:8888" # HTTP API (paths list / health)
