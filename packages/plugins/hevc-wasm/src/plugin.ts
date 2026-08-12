@@ -27,8 +27,10 @@ export interface CreateHevcSoftFactoryOptions {
   esmUrl: string;
   /** URL of the libde265.wasm binary. */
   wasmUrl: string;
-  /** Expected hex SHA-256 of the wasm bytes; verified when provided. */
-  sha256?: string;
+  /** Expected hex SHA-256 of the wasm bytes (required). */
+  sha256: string;
+  /** Expected hex SHA-256 of the ESM wrapper bytes (recommended). */
+  esmSha256?: string;
   /** Fetcher for wasm/ESM bytes; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** Dynamic import of the ESM URL; defaults to `import(url)`. */

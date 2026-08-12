@@ -74,7 +74,9 @@ function readAmfValue(reader: AmfReader): unknown {
       return null;
     case AMF_ECMA_ARRAY: {
       const count = reader.readU32();
-      const result: Record<string, unknown> = {};
+      // Null-prototype object: AMF0 keys are attacker-controlled and must not
+      // be able to poison Object.prototype via `__proto__` / `constructor`.
+      const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
       for (let i = 0; i < count; i++) {
         if (reader.eof()) {
           break;

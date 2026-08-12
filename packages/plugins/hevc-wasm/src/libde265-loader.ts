@@ -65,28 +65,40 @@ export interface LoadLibde265Options {
   esmUrl: string;
   /** URL of the libde265.wasm binary. */
   wasmUrl?: string;
-  /** Expected hex SHA-256 of the wasm bytes; verified when provided. */
+  /** Expected hex SHA-256 of the wasm bytes. Required in browser loads. */
   sha256?: string;
+  /** Expected hex SHA-256 of the ESM wrapper bytes (recommended). */
+  esmSha256?: string;
   /** Fetcher for wasm/ESM bytes. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
-   * Dynamic import of the ESM URL. Defaults to `import(url)` when absent;
-   * only environments that block dynamic import (strict CSP) reach the
-   * `new Function` evaluation fallback.
+   * Dynamic import of the ESM URL. Defaults to native `import(url)`. Only
+   * environments that cannot use dynamic import pass their own loader; the
+   * unsafe `new Function` evaluation fallback has been removed — fetched ESM
+   * text is never evaluated as code.
    */
   importImpl?: (url: string) => Promise<unknown>;
 }
 
 type Libde265Factory = LoadedLibde265['default'];
 
+/** Verifies a hex digest, returning the lowercase hex of `bytes`. */
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 /**
- * Loads the vendored libde265 artifact: fetches the wasm bytes, verifies their
- * SHA-256 against `sha256` when provided, instantiates the ESM module with the
- * wasm injected via the standard Emscripten `wasmBinary` option, and returns
- * the runtime Module exposing the `Decoder` class.
+ * Loads the vendored libde265 artifact: fetches the wasm (and the ESM wrapper
+ * when an `esmSha256` pin is supplied), verifies each sha256, instantiates the
+ * ESM module with the verified wasm injected via the standard Emscripten
+ * `wasmBinary` option, and returns the runtime Module exposing the `Decoder`
+ * class. Mismatch or a missing browser pin fails closed before instantiation.
  */
 export async function loadLibde265(options: LoadLibde265Options): Promise<Libde265Module> {
-  const { esmUrl, wasmUrl, sha256, fetchImpl, importImpl } = options;
+  const { esmUrl, wasmUrl, sha256, esmSha256, fetchImpl, importImpl } = options;
   const doFetch = fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
 
   if (wasmUrl === undefined) {
@@ -98,18 +110,17 @@ export async function loadLibde265(options: LoadLibde265Options): Promise<Libde2
   }
   const wasmBytes = new Uint8Array(await wasmResponse.arrayBuffer());
 
-  if (sha256 !== undefined) {
-    const expected = sha256.toLowerCase();
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', wasmBytes);
-    const actual = [...new Uint8Array(digest)]
-      .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('');
-    if (actual !== expected) {
-      throw new Error('libde265 sha256 mismatch');
-    }
+  if (sha256 === undefined) {
+    // The wasm pin is what makes the vendored-artifact policy hold. A browser
+    // load without a pin is a supply-chain hole, so require it.
+    throw new Error('libde265: sha256 pin is required to load the wasm artifact');
+  }
+  const digest = await sha256Hex(wasmBytes);
+  if (digest !== sha256.toLowerCase()) {
+    throw new Error('libde265 sha256 mismatch');
   }
 
-  const factory = await resolveEsmFactory(esmUrl, doFetch, importImpl);
+  const factory = await resolveEsmFactory(esmUrl, doFetch, importImpl, esmSha256);
   return await factory({ wasmBinary: wasmBytes.buffer });
 }
 
@@ -117,7 +128,25 @@ async function resolveEsmFactory(
   esmUrl: string,
   doFetch: typeof fetch,
   importImpl: ((url: string) => Promise<unknown>) | undefined,
+  esmSha256: string | undefined,
 ): Promise<Libde265Factory> {
+  if (esmSha256 !== undefined) {
+    // Verify the ESM wrapper bytes before any code executes. The wasm pin
+    // alone would let a tampered wrapper run arbitrary code in the page.
+    // The wrapper is then loaded from its configured URL: the pin protects
+    // against a drifted/tampered artifact, and a re-fetch of the same URL is
+    // the standard double-check (the window between verification and import
+    // is not attacker-controlled on a static same-origin vendor file).
+    const esmResponse = await doFetch(esmUrl);
+    if (!esmResponse.ok) {
+      throw new Error(`libde265: failed to fetch ESM from ${esmUrl}`);
+    }
+    const esmBytes = new Uint8Array(await esmResponse.arrayBuffer());
+    const digest = await sha256Hex(esmBytes);
+    if (digest !== esmSha256.toLowerCase()) {
+      throw new Error('libde265 ESM sha256 mismatch');
+    }
+  }
   if (importImpl !== undefined) {
     const imported = (await importImpl(esmUrl)) as { default?: Libde265Factory };
     if (typeof imported.default !== 'function') {
@@ -125,31 +154,11 @@ async function resolveEsmFactory(
     }
     return imported.default;
   }
-  try {
-    // Both Node (file:// URLs) and browsers (http(s):// URLs) support native
-    // dynamic import; this is the primary path.
-    const imported = (await import(esmUrl)) as { default?: Libde265Factory };
-    if (typeof imported.default !== 'function') {
-      throw new Error('libde265: dynamic import did not expose a default factory');
-    }
-    return imported.default;
-  } catch {
-    // Strict-CSP environments that block dynamic import: evaluate the ESM
-    // text. The vendored artifact is `async function Module(...) {...}
-    // export default Module;` — `new Function` bodies cannot contain
-    // import/export statements, so strip the trailing default export and
-    // return the factory directly.
-    const esmResponse = await doFetch(esmUrl);
-    if (!esmResponse.ok) {
-      throw new Error(`libde265: failed to fetch ESM from ${esmUrl}`);
-    }
-    const source = await esmResponse.text();
-    const factory: unknown = new Function(
-      source.replace(/export default Module;\s*$/, '') + '; return Module;',
-    )();
-    if (typeof factory !== 'function') {
-      throw new Error('libde265: evaluated ESM did not expose a Module factory');
-    }
-    return factory as Libde265Factory;
+  // Native dynamic import — Node (file://) and browsers (http(s)://) both
+  // support it; same-origin imports work under typical `script-src 'self'` CSP.
+  const imported = (await import(esmUrl)) as { default?: Libde265Factory };
+  if (typeof imported.default !== 'function') {
+    throw new Error('libde265: dynamic import did not expose a default factory');
   }
+  return imported.default;
 }

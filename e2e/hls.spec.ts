@@ -137,6 +137,15 @@ test('plays HLS stream with WebCodecs and renders frames', async ({ page }) => {
   page.on('console', (msg) => consoleLines.push(`[${msg.type()}] ${msg.text()}`));
   page.on('pageerror', (err) => pageErrors.push(`PAGEERROR: ${err.message}`));
 
+  // Segment-fetch evidence: the VOD media playlist lists 10 segments (all
+  // named seg-0.ts), and the source fetches every one through the network
+  // layer. Counting page requests (rather than inspecting page state) works
+  // even though the segments share a URL and the HTTP cache may serve repeats.
+  let segmentRequests = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('seg-0.ts')) segmentRequests++;
+  });
+
   let lastStats: PlayerStatsShape | null = null;
   let renderMode: string | null = null;
   try {
@@ -172,6 +181,14 @@ test('plays HLS stream with WebCodecs and renders frames', async ({ page }) => {
     lastStats = current;
     expect(current.framesDecoded, `player stats: ${JSON.stringify(current)}`).toBeGreaterThan(0);
     expect(current.errors.length, `player errors: ${JSON.stringify(current.errors)}`).toBe(0);
+
+    // All 10 playlist segments must have been fetched (see segmentRequests
+    // above). Poll rather than assert immediately: the source streams the
+    // remaining segments in the background after the first frames decode.
+    await expect
+      .poll(() => segmentRequests, { timeout: 30_000 })
+      .toBeGreaterThanOrEqual(10);
+    console.log(`e2e: HLS segment fetches observed: ${segmentRequests}`);
 
     renderMode = await readRenderMode(page);
     expect(['webgl2', 'webgpu'], `renderMode: ${String(renderMode)}`).toContain(renderMode);

@@ -26,10 +26,20 @@ export class FakeImage implements Libde265Image {
   width: number;
   height: number;
   deleted = false;
+  deleteCalls = 0;
   private readonly bitsPerPixel: number;
-  private readonly planes: Uint8Array[];
+  private readonly planeBytes: Uint8Array[];
+  private readonly planeStrides: number[];
 
-  constructor(pts: bigint, width = 16, height = 16, chroma = 1, bitsPerPixel = 8, isFullRange = false) {
+  constructor(
+    pts: bigint,
+    width = 16,
+    height = 16,
+    chroma = 1,
+    bitsPerPixel = 8,
+    isFullRange = false,
+    nonTightStride = false,
+  ) {
     this.pts = pts;
     this.width = width;
     this.height = height;
@@ -38,13 +48,23 @@ export class FakeImage implements Libde265Image {
     this.isFullRange = isFullRange;
     const { subW, subH } = chromaDims(chroma);
     const sampleBytes = bitsPerPixel > 8 ? 2 : 1;
-    const y = new Uint8Array(width * height * sampleBytes);
-    const u = new Uint8Array((width / subW) * (height / subH) * sampleBytes);
-    const v = new Uint8Array((width / subW) * (height / subH) * sampleBytes);
-    y.fill(64);
-    u.fill(128);
-    v.fill(128);
-    this.planes = [y, u, v];
+    this.planeBytes = [];
+    this.planeStrides = [];
+    for (let channel = 0; channel < 3; channel++) {
+      const w = width / (channel === 0 ? 1 : subW);
+      const h = height / (channel === 0 ? 1 : subH);
+      const tight = new Uint8Array(w * h * sampleBytes);
+      tight.fill(channel === 0 ? 64 : 128);
+      // Model the wasm heap: the underlying plane is stride*height bytes and
+      // `bytes` is the tight subview at its start. Backing the subview with
+      // the full plane size keeps yuvToRgba's fullPlaneView (stride*height) in
+      // bounds, and the persistent view keeps in-place fills observable.
+      const stride = nonTightStride ? w * 2 : w * sampleBytes;
+      const backing = new ArrayBuffer(stride * h);
+      new Uint8Array(backing).set(tight);
+      this.planeBytes.push(new Uint8Array(backing, 0, tight.length));
+      this.planeStrides.push(stride);
+    }
   }
 
   getWidth(channel: number): number {
@@ -62,13 +82,17 @@ export class FakeImage implements Libde265Image {
   }
 
   getImagePlane(channel: number): { width: number; height: number; bytes: Uint8Array; stride: number } {
-    const bytes = this.planes[channel]!;
-    const height = this.getHeight(channel);
-    return { width: this.getWidth(channel), height, bytes, stride: bytes.length / height };
+    return {
+      width: this.getWidth(channel),
+      height: this.getHeight(channel),
+      bytes: this.planeBytes[channel]!,
+      stride: this.planeStrides[channel]!,
+    };
   }
 
   delete(): void {
     this.deleted = true;
+    this.deleteCalls++;
   }
 }
 

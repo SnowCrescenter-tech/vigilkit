@@ -38,6 +38,80 @@ export class FakeTransport implements Transport {
   }
 }
 
+/**
+ * Transport whose events are driven manually by the test. Unlike FakeTransport
+ * it does not emit 'open' from connect(), so tests can exercise the connecting
+ * window (timeouts, destroy-during-connect, close-before-open).
+ */
+export class ManualTransport implements Transport {
+  closed = false;
+  connectCount = 0;
+  private listener: ((event: TransportEvent) => void) | null = null;
+
+  connect(): void {
+    this.connectCount++;
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  onEvent(listener: (event: TransportEvent) => void): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = null;
+    };
+  }
+
+  emitOpen(): void {
+    this.listener?.({ type: 'open' });
+  }
+
+  emitData(data: Uint8Array): void {
+    this.listener?.({ type: 'data', data });
+  }
+
+  emitClose(code = 1000): void {
+    this.listener?.({ type: 'close', code });
+  }
+
+  emitError(error: MediaErrorInfo): void {
+    this.listener?.({ type: 'error', error });
+  }
+}
+
+/** Demuxer that turns transport bytes into a sequence-header + video chunks. */
+export class DataDemuxer implements Demuxer {
+  closed = false;
+  private listener: ((event: DemuxerEvent) => void) | null = null;
+  private emittedHeader = false;
+
+  push(data: Uint8Array): void {
+    if (!this.emittedHeader) {
+      this.emittedHeader = true;
+      this.listener?.({
+        type: 'sequence-header',
+        config: { codec: 'vp8', codedWidth: 640, codedHeight: 480 },
+      });
+    }
+    const ptsUs = Math.round(performance.now() * 1000);
+    this.listener?.({ type: 'video', chunk: { type: 'delta', timestamp: ptsUs, data } });
+  }
+
+  flush(): void {}
+
+  onEvent(listener: (event: DemuxerEvent) => void): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = null;
+    };
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+}
+
 export class FakeDemuxer implements Demuxer {
   closed = false;
   private listener: ((event: DemuxerEvent) => void) | null = null;

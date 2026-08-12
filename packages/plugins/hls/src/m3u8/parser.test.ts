@@ -80,6 +80,39 @@ seg-0.ts
     expect(playlist.segments[0]?.uri).toBe('seg-0.ts');
   });
 
+  it('parses quoted attribute values', () => {
+    const playlist = parseM3u8(`#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH="200000",RESOLUTION="426x240"
+low.m3u8
+`);
+    expect(playlist.variants).toHaveLength(1);
+    expect(playlist.variants[0]).toEqual({ uri: 'low.m3u8', bandwidth: 200000, resolution: { width: 426, height: 240 } });
+  });
+
+  it('an EXTINF with a missing duration does not produce a NaN segment', () => {
+    const playlist = parseM3u8(`#EXTM3U
+#EXTINF:
+seg-0.ts
+#EXTINF:2.0,
+seg-1.ts
+`);
+    // The malformed #EXTINF: entry is skipped: no NaN-duration segment.
+    expect(playlist.segments).toHaveLength(1);
+    expect(playlist.segments[0]).toEqual({ uri: 'seg-1.ts', duration: 2 });
+  });
+
+  // Pinned behavior: a segment URI with no preceding #EXTINF (and no pending
+  // variant tag) is silently dropped — it is neither an error nor a segment.
+  it('a segment URI without a preceding EXTINF is dropped silently', () => {
+    const playlist = parseM3u8(`#EXTM3U
+orphan.ts
+#EXTINF:2.0,
+seg-0.ts
+`);
+    expect(playlist.segments).toHaveLength(1);
+    expect(playlist.segments[0]?.uri).toBe('seg-0.ts');
+  });
+
   it('throws HlsError when #EXTM3U is missing', () => {
     expect(() => parseM3u8('#EXT-X-TARGETDURATION:2\n#EXTINF:1.0,\nseg.ts')).toThrow(HlsError);
   });

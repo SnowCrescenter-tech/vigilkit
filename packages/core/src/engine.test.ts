@@ -2,15 +2,57 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createPlayer } from './player.js';
 import { FakeEncodedVideoChunk, FakeVideoDecoder } from './fake-video-decoder.fixture.js';
 import {
+  DataDemuxer,
   FakeDemuxer,
   FakeMediaSource,
   FakeTransport,
+  ManualTransport,
   fakeRenderer,
   makeSoftFactory,
   makeSourcePlugin,
 } from './engine-test-fixtures.js';
-import type { MediaErrorInfo, Plugin, SourceOptions, SourcePlugin } from '@vigilkit/plugin-sdk';
+import type { Demuxer, MediaErrorInfo, Plugin, SourceOptions, SourcePlugin, Transport } from '@vigilkit/plugin-sdk';
 import type { RendererSurface } from './types.js';
+
+/** Transport-path harness: a ManualTransport + a DataDemuxer behind plugins. */
+function makeDemuxerPipeline(transport: Transport, renderer: RendererSurface = fakeRenderer()): {
+  player: ReturnType<typeof createPlayer>;
+  demuxer: () => Demuxer | null;
+} {  const holder: { demuxer: Demuxer | null } = { demuxer: null };
+  const transportPlugin: Plugin = {
+    type: 'transport',
+    id: 'fake-ws',
+    schemes: ['ws', 'wss'],
+    create: () => transport,
+  };
+  const demuxerPlugin: Plugin = {
+    type: 'demuxer',
+    id: 'fake-flv',
+    mimeTypes: ['video/x-flv'],
+    schemes: ['flv'],
+    create: () => {
+      holder.demuxer = new DataDemuxer();
+      return holder.demuxer;
+    },
+  };
+  const player = createPlayer({
+    url: 'ws://host/stream',
+    demuxer: 'flv',
+    plugins: [transportPlugin, demuxerPlugin],
+    renderer,
+  });
+  return { player, demuxer: () => holder.demuxer };
+}
+
+/** Renderer whose draw() is a typed vitest mock (draw: vi.fn() infers Mock). */
+function mockRenderer() {
+  return {
+    renderMode: 'canvas2d' as const,
+    draw: vi.fn(),
+    resize: vi.fn(),
+    destroy: vi.fn(),
+  };
+}
 
 describe('Engine source plugins', () => {
   beforeEach(() => {
@@ -186,5 +228,259 @@ describe('Engine source plugins', () => {
     player.play();
     vi.advanceTimersByTime(100);
     expect(renderer.draw).toHaveBeenCalled();
+  });
+});
+
+describe('Engine transport pipeline', () => {
+  beforeEach(() => {
+    FakeVideoDecoder.resetInstances();
+    vi.useFakeTimers();
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder);
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('a transport that never opens surfaces a TRANSPORT connect-timeout error', () => {
+    const transport = new ManualTransport();
+    const { player } = makeDemuxerPipeline(transport);
+    const errors: MediaErrorInfo[] = [];
+    player.on('error', (e) => errors.push(e));
+    player.play();
+    expect(player.getStats().state).toBe('connecting');
+    vi.advanceTimersByTime(10_000);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('TRANSPORT');
+    expect(errors[0]?.message).toBe('connect timeout');
+    expect(player.getStats().state).toBe('error');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a clean transport close transitions to stopped and stops decoding', () => {
+    const transport = new ManualTransport();
+    const { player } = makeDemuxerPipeline(transport);
+    const errors: MediaErrorInfo[] = [];
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('error', (e) => errors.push(e));
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    transport.emitOpen();
+    expect(player.getStats().state).toBe('playing');
+    transport.emitData(new Uint8Array([1]));
+    vi.advanceTimersByTime(30);
+    const decodedBeforeClose = player.getStats().framesDecoded;
+    expect(decodedBeforeClose).toBeGreaterThan(0);
+    transport.emitClose(1000);
+    expect(player.getStats().state).toBe('stopped');
+    expect(errors).toHaveLength(0);
+    vi.advanceTimersByTime(1000);
+    expect(player.getStats().framesDecoded).toBe(decodedBeforeClose);
+    expect(player.getStats().framesDropped).toBe(0);
+  });
+
+  it('a transport plugin whose create() throws surfaces a TRANSPORT error instead of throwing from play()', () => {
+    const transportPlugin: Plugin = {
+      type: 'transport',
+      id: 'fake-ws',
+      schemes: ['ws', 'wss'],
+      create: () => {
+        throw new Error('malformed ws url');
+      },
+    };
+    const demuxerPlugin: Plugin = {
+      type: 'demuxer',
+      id: 'fake-flv',
+      mimeTypes: ['video/x-flv'],
+      schemes: ['flv'],
+      create: () => new DataDemuxer(),
+    };
+    const player = createPlayer({
+      url: 'ws://host/stream',
+      demuxer: 'flv',
+      plugins: [transportPlugin, demuxerPlugin],
+      renderer: fakeRenderer(),
+    });
+    const errors: MediaErrorInfo[] = [];
+    player.on('error', (e) => errors.push(e));
+    expect(() => player.play()).not.toThrow();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('TRANSPORT');
+    expect(errors[0]?.message).toBe('malformed ws url');
+    expect(player.getStats().state).toBe('error');
+  });
+
+  it('a demuxer plugin whose create() throws surfaces an UNSUPPORTED error instead of throwing from play()', () => {
+    const transportPlugin: Plugin = {
+      type: 'transport',
+      id: 'fake-ws',
+      schemes: ['ws', 'wss'],
+      create: () => new ManualTransport(),
+    };
+    const demuxerPlugin: Plugin = {
+      type: 'demuxer',
+      id: 'fake-flv',
+      mimeTypes: ['video/x-flv'],
+      schemes: ['flv'],
+      create: () => {
+        throw new Error('no demuxer for stream');
+      },
+    };
+    const player = createPlayer({
+      url: 'ws://host/stream',
+      demuxer: 'flv',
+      plugins: [transportPlugin, demuxerPlugin],
+      renderer: fakeRenderer(),
+    });
+    const errors: MediaErrorInfo[] = [];
+    player.on('error', (e) => errors.push(e));
+    expect(() => player.play()).not.toThrow();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('UNSUPPORTED');
+    expect(errors[0]?.message).toBe('no demuxer for stream');
+    expect(player.getStats().state).toBe('error');
+  });
+
+  it('a source plugin whose create() throws surfaces an UNSUPPORTED error instead of throwing from play()', () => {
+    const sourcePlugin: SourcePlugin = {
+      type: 'source',
+      id: 'hls',
+      mimeTypes: ['application/vnd.apple.mpegurl'],
+      schemes: ['http', 'https'],
+      create: () => {
+        throw new Error('manifest plugin exploded');
+      },
+    };
+    const player = createPlayer({
+      url: 'hls://host/stream.m3u8',
+      demuxer: 'hls',
+      plugins: [sourcePlugin],
+      renderer: fakeRenderer(),
+    });
+    const errors: MediaErrorInfo[] = [];
+    player.on('error', (e) => errors.push(e));
+    expect(() => player.play()).not.toThrow();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('UNSUPPORTED');
+    expect(errors[0]?.message).toBe('manifest plugin exploded');
+    expect(player.getStats().state).toBe('error');
+  });
+
+  it('a renderer whose draw() throws surfaces a RENDERER error', () => {
+    const transport = new ManualTransport();
+    const renderer = mockRenderer();
+    renderer.draw.mockImplementation(() => {
+      throw new Error('gpu exploded');
+    });
+    const { player } = makeDemuxerPipeline(transport, renderer);
+    const errors: MediaErrorInfo[] = [];
+    player.on('error', (e) => errors.push(e));
+    player.play();
+    transport.emitOpen();
+    transport.emitData(new Uint8Array([1]));
+    vi.advanceTimersByTime(30);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('RENDERER');
+    expect(errors[0]?.message).toBe('gpu exploded');
+    expect(player.getStats().state).toBe('error');
+  });
+
+  it('play() after pause resumes the pump and reaches playing', () => {
+    const transport = new ManualTransport();
+    const { player } = makeDemuxerPipeline(transport);
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    transport.emitOpen();
+    transport.emitData(new Uint8Array([1]));
+    vi.advanceTimersByTime(30);
+    const decodedAfterFirst = player.getStats().framesDecoded;
+    expect(decodedAfterFirst).toBeGreaterThan(0);
+    player.pause();
+    expect(player.getStats().state).toBe('paused');
+    transport.emitData(new Uint8Array([2]));
+    vi.advanceTimersByTime(100);
+    expect(player.getStats().framesDecoded).toBe(decodedAfterFirst);
+    player.play();
+    expect(player.getStats().state).toBe('playing');
+    transport.emitData(new Uint8Array([3]));
+    vi.advanceTimersByTime(100);
+    expect(player.getStats().framesDecoded).toBeGreaterThan(decodedAfterFirst);
+  });
+
+  it('play() after an error restarts the pipeline with fresh transport/demuxer', () => {
+    const holder: { transport: ManualTransport | null; demuxer: DataDemuxer | null } = {
+      transport: null,
+      demuxer: null,
+    };
+    const transportPlugin: Plugin = {
+      type: 'transport',
+      id: 'fake-ws',
+      schemes: ['ws', 'wss'],
+      create: () => {
+        holder.transport = new ManualTransport();
+        return holder.transport;
+      },
+    };
+    const demuxerPlugin: Plugin = {
+      type: 'demuxer',
+      id: 'fake-flv',
+      mimeTypes: ['video/x-flv'],
+      schemes: ['flv'],
+      create: () => {
+        holder.demuxer = new DataDemuxer();
+        return holder.demuxer;
+      },
+    };
+    const player = createPlayer({
+      url: 'ws://host/stream',
+      demuxer: 'flv',
+      plugins: [transportPlugin, demuxerPlugin],
+      renderer: fakeRenderer(),
+    });
+    player.play();
+    const firstTransport = holder.transport!;
+    const firstDemuxer = holder.demuxer!;
+    firstTransport.emitOpen();
+    firstTransport.emitError({ code: 'TRANSPORT', message: 'socket died' });
+    expect(player.getStats().state).toBe('error');
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    expect(player.getStats().state).toBe('connecting');
+    expect(holder.transport).not.toBe(firstTransport);
+    expect(holder.demuxer).not.toBe(firstDemuxer);
+    expect(firstTransport.closed).toBe(true);
+    expect(firstDemuxer.closed).toBe(true);
+    holder.transport!.emitOpen();
+    expect(player.getStats().state).toBe('playing');
+    holder.transport!.emitData(new Uint8Array([1]));
+    vi.advanceTimersByTime(100);
+    expect(frames.length).toBeGreaterThan(0);
+  });
+
+  it('destroy() during connecting is safe and suppresses late open/data', () => {
+    const transport = new ManualTransport();
+    const { player } = makeDemuxerPipeline(transport);
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    const errors: MediaErrorInfo[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.on('error', (e) => errors.push(e));
+    player.play();
+    expect(player.getStats().state).toBe('connecting');
+    player.destroy();
+    expect(player.getStats().state).toBe('stopped');
+    expect(transport.closed).toBe(true);
+    expect(() => {
+      transport.emitOpen();
+      transport.emitData(new Uint8Array([1]));
+    }).not.toThrow();
+    expect(frames).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+    vi.advanceTimersByTime(10_000);
+    expect(errors).toHaveLength(0);
+    expect(player.getStats().state).toBe('stopped');
   });
 });

@@ -17,6 +17,8 @@ import type { Libde265Module } from '@vigilkit/plugin-hevc-wasm';
 
 /** Pinned SHA-256 of examples/basic/vendor/libde265.wasm (see vendor/README.md). */
 const WASM_SHA256 = '440c6bbc60af222e72141583ce583423b0b8dd3fe0b53e823fa2e99988eca5b8';
+/** Pinned SHA-256 of libde265-esm.js (vendor/libde265.sha256). */
+const ESM_SHA256 = '3d431114c87569ff71b3a8f434c3a67ba8239fbef18cea80e2f22e5049d7b0ab';
 /** Runtime URL, served by server.mjs — NOT part of the Vite bundle. */
 const VENDOR_ESM_URL = '/vendor/libde265-esm.js';
 const VENDOR_WASM_URL = '/vendor/libde265.wasm';
@@ -72,9 +74,20 @@ async function loadLibde265Module(): Promise<Libde265Module> {
     throw new Error(`failed to fetch wasm from ${VENDOR_WASM_URL}`);
   }
   const wasmBytes = new Uint8Array(await wasmResponse.arrayBuffer());
-  const digest = await crypto.subtle.digest('SHA-256', wasmBytes);
-  if (hex(new Uint8Array(digest)) !== WASM_SHA256) {
+  const wasmDigest = await crypto.subtle.digest('SHA-256', wasmBytes);
+  if (hex(new Uint8Array(wasmDigest)) !== WASM_SHA256) {
     throw new Error('libde265 wasm sha256 mismatch');
+  }
+  // Verify the ESM wrapper bytes before any code from it executes; then load
+  // it from the configured URL (same-origin vendor file).
+  const esmResponse = await fetch(VENDOR_ESM_URL);
+  if (!esmResponse.ok) {
+    throw new Error(`failed to fetch esm from ${VENDOR_ESM_URL}`);
+  }
+  const esmBytes = new Uint8Array(await esmResponse.arrayBuffer());
+  const esmDigest = await crypto.subtle.digest('SHA-256', esmBytes);
+  if (hex(new Uint8Array(esmDigest)) !== ESM_SHA256) {
+    throw new Error('libde265 esm sha256 mismatch');
   }
   const factory = (await import(/* @vite-ignore */ VENDOR_ESM_URL)) as unknown as {
     default: (options: { wasmBinary: ArrayBuffer }) => Promise<Libde265Module>;

@@ -191,6 +191,26 @@ describe('FlvDemuxer', () => {
     demuxer.close();
   });
 
+  it('a tag with dataSize over the maximum surfaces a DEMUX error instead of buffering forever', () => {
+    const demuxer = new FlvDemuxer();
+    const events = collect(demuxer);
+    // Tag header whose dataSize claims 16MB-1 (the u24 ceiling, 0xFFFFFF) —
+    // the corrupt value that previously made the demuxer buffer indefinitely.
+    const huge = new Uint8Array(11 + 4 + 4);
+    huge[0] = 9; // video tag
+    huge.set(u24(0xffffff), 1);
+    demuxer.push(concat(header(), huge));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'error',
+      error: { code: 'DEMUX', message: 'tag exceeds maximum size' },
+    });
+    // The demuxer is failed: later pushes are inert.
+    demuxer.push(concat(header(), videoSeqTag()));
+    expect(events).toHaveLength(1);
+    demuxer.close();
+  });
+
   it('demuxes the real fate-head.bin fixture in 7KB chunks', () => {
     const fixture = readFileSync(new URL('../test/fixtures/fate-head.bin', import.meta.url));
     const demuxer = new FlvDemuxer();

@@ -37,7 +37,30 @@ const ALLOWLIST = [
   '0bsd',
   'cc0-1.0',
   'unlicense',
+  // Vite dev tooling transitive dep (CSS transformer, dev-only). File-level
+  // copyleft; acceptable for dev tooling, listed for explicit review.
+  'mpl-2.0',
+  // pnpm toolchain transitive deps (dev-only). BlueOak-1.0.0 and Python-2.0
+  // are both permissive licenses.
+  'blueoak-1.0.0',
+  'python-2.0',
 ];
+
+/** Scans a pass of the dependency tree (production XOR dev) and returns entries. */
+async function scanPass(checker, opts) {
+  return await new Promise((resolve, reject) => {
+    checker.init(
+      {
+        start: process.cwd(),
+        production: opts.production,
+        dev: opts.dev,
+        excludePrivatePackages: true,
+        customFormat: CUSTOM_FORMAT,
+      },
+      (err, data) => (err ? reject(new Error(err.message || String(err))) : resolve(data ?? {})),
+    );
+  });
+}
 
 const args = new Set(process.argv.slice(2));
 const generateNotices = args.has('--generate-notices');
@@ -110,17 +133,16 @@ async function main() {
 
   let packages;
   try {
-    packages = await new Promise((resolve, reject) => {
-      checker.init(
-        {
-          start: process.cwd(),
-          production: false,
-          dev: true,
-          customFormat: CUSTOM_FORMAT,
-        },
-        (err, data) => (err ? reject(new Error(err.message || String(err))) : resolve(data ?? {})),
-      );
-    });
+    // Scan BOTH passes: dev deps AND runtime deps. A dependency added to any
+    // package's `dependencies` field must never silently disappear from the
+    // scan or the notices (it would bypass the GPL blocklist). Runtime deps of
+    // workspace packages are all `workspace:*` today, but the scan must cover
+    // them regardless.
+    const [devTree, prodTree] = await Promise.all([
+      scanPass(checker, { production: false, dev: true }),
+      scanPass(checker, { production: true, dev: false }),
+    ]);
+    packages = { ...devTree, ...prodTree };
   } catch (error) {
     console.error(`[licenses] init failed: ${error.message}`);
     process.exitCode = 1;
@@ -165,6 +187,16 @@ async function main() {
       console.error(`  - ${entry.name}@${entry.version}: ${entry.licenses}`);
     }
     console.error('[licenses] verdict: FAIL');
+    process.exitCode = 1;
+  } else if (ciMode && unknown.length > 0) {
+    // In CI, an unrecognized/missing license field is a hard failure: a GPL
+    // dep declared as "UNKNOWN" or "SEE LICENSE IN ..." must not slip through
+    // as warn-only. Warnings are still fine for interactive runs.
+    console.error('[licenses] UNKNOWN licenses in CI are failures (missing or unparseable license field):');
+    for (const entry of unknown) {
+      console.error(`  - ${entry.name}@${entry.version}: ${entry.licenses}`);
+    }
+    console.error('[licenses] verdict: FAIL (unknown license)');
     process.exitCode = 1;
   } else {
     console.log('[licenses] verdict: PASS (no GPL/AGPL/LGPL dependencies)');

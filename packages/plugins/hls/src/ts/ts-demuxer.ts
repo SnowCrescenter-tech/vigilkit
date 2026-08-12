@@ -1,11 +1,7 @@
 import type { Demuxer, DemuxerEvent } from '@vigilkit/plugin-sdk';
-import {
-  buildAvcC,
-  codecStringFromSps,
-  isAnnexB,
-  splitAnnexBNalus,
-} from '@vigilkit/media-utils';
+import { buildAvcC, codecStringFromSps } from '@vigilkit/media-utils';
 import { parseAdtsHeader } from './adts.js';
+import { rebuildAvcc, splitNalus } from './es.js';
 import { TsPacketizer, parsePacket } from './packet.js';
 import { parsePesHeader } from './pes.js';
 import { SectionAssembler, parsePat, parsePmt } from './psi.js';
@@ -26,7 +22,9 @@ type Listener = (event: DemuxerEvent) => void;
  */
 export class TsDemuxer implements Demuxer {
   private readonly listeners = new Set<Listener>();
-  private readonly packetizer = new TsPacketizer();
+  private readonly packetizer = new TsPacketizer({
+    onError: (message) => this.failDemux(message),
+  });
   private readonly patAssembler = new SectionAssembler();
   private pmtAssembler: SectionAssembler | null = null;
   private pmtPid: number | null = null;
@@ -39,6 +37,7 @@ export class TsDemuxer implements Demuxer {
   private audioMetaEmitted = false;
   private hasVideoStream = false;
   private hasAudioStream = false;
+  private failed = false;
   private lastEmittedPtsUs: number | null = null;
   private ptsOffsetUs = 0;
 
@@ -49,6 +48,7 @@ export class TsDemuxer implements Demuxer {
 
   flush(): void {
     this.packetizer.flush();
+    if (this.failed) return;
     for (const [pid, buffer] of this.pesBuffers) {
       const streamType = this.streamTypeByPid.get(pid);
       if (buffer.length > 0 && streamType !== undefined) this.finalizePes(pid, buffer, streamType);
@@ -73,11 +73,13 @@ export class TsDemuxer implements Demuxer {
     this.audioMetaEmitted = false;
     this.hasVideoStream = false;
     this.hasAudioStream = false;
+    this.failed = false;
     this.lastEmittedPtsUs = null;
     this.ptsOffsetUs = 0;
   }
 
   private processPacket(packet: Uint8Array): void {
+    if (this.failed) return;
     const parsed = parsePacket(packet);
     if (parsed === null || parsed.payload.length === 0) return;
     const { pid, payload, payloadUnitStart } = parsed;
@@ -105,15 +107,35 @@ export class TsDemuxer implements Demuxer {
   }
 
   private handlePmt(section: Uint8Array): void {
+    let recognized = false;
     for (const entry of parsePmt(section)) {
       if (entry.streamType === STREAM_VIDEO_H264 || entry.streamType === STREAM_VIDEO_HEVC) {
         this.streamTypeByPid.set(entry.pid, entry.streamType);
         this.hasVideoStream = true;
+        recognized = true;
       } else if (entry.streamType === STREAM_AUDIO_AAC) {
         this.streamTypeByPid.set(entry.pid, entry.streamType);
         this.hasAudioStream = true;
+        recognized = true;
       }
     }
+    if (recognized) {
+      // Continuity checking applies only to the PES streams; PSI PIDs (PAT/
+      // PMT) are retransmitted with muxer-specific cadence.
+      this.packetizer.setTrackedPids(new Set(this.streamTypeByPid.keys()));
+    } else {
+      // A PMT with no recognizable stream (no H.264/HEVC/AAC) would otherwise
+      // leave the demuxer emitting nothing forever — a silent black screen.
+      // Surface it as a hard DEMUX failure and stop processing further packets.
+      this.failDemux('no recognized streams in PMT');
+    }
+  }
+
+  /** Marks the demuxer failed and emits a DEMUX error (at most once). */
+  private failDemux(message: string): void {
+    if (this.failed) return;
+    this.failed = true;
+    this.emit({ type: 'error', error: { code: 'DEMUX', message } });
   }
 
   private feedPes(pid: number, payload: Uint8Array, payloadUnitStart: boolean, streamType: number): void {
@@ -232,52 +254,4 @@ export class TsDemuxer implements Demuxer {
   private emit(event: DemuxerEvent): void {
     for (const listener of this.listeners) listener(event);
   }
-}
-
-/** Splits ES data into NALUs whether Annex-B or 4-byte length prefixed. */
-function splitNalus(data: Uint8Array): Uint8Array[] {
-  const nalus = isAnnexB(data) ? splitAnnexBNalus(data) : splitByLengthPrefix(data);
-  return nalus.filter((nalu) => nalu.length > 0 && (nalu[0] as number) !== 0xff);
-}
-
-function splitByLengthPrefix(data: Uint8Array): Uint8Array[] {
-  if (data.length < 4) return [];
-  const firstLength = readU32(data, 0);
-  if (firstLength === 0 || firstLength > data.length - 4) return [];
-  const nalus: Uint8Array[] = [];
-  let pos = 0;
-  while (pos + 4 <= data.length) {
-    const length = readU32(data, pos);
-    if (length === 0 || pos + 4 + length > data.length) break;
-    nalus.push(data.slice(pos + 4, pos + 4 + length));
-    pos += 4 + length;
-  }
-  return nalus;
-}
-
-/** Re-frames NALUs as AVCC (4-byte BE length prefix) — drops TS stuffing bytes. */
-function rebuildAvcc(nalus: Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const nalu of nalus) total += 4 + nalu.length;
-  const out = new Uint8Array(total);
-  let pos = 0;
-  for (const nalu of nalus) {
-    out[pos] = (nalu.length >>> 24) & 0xff;
-    out[pos + 1] = (nalu.length >>> 16) & 0xff;
-    out[pos + 2] = (nalu.length >>> 8) & 0xff;
-    out[pos + 3] = nalu.length & 0xff;
-    out.set(nalu, pos + 4);
-    pos += 4 + nalu.length;
-  }
-  return out;
-}
-
-function readU32(data: Uint8Array, offset: number): number {
-  return (
-    ((((data[offset] as number) << 24) |
-      ((data[offset + 1] as number) << 16) |
-      ((data[offset + 2] as number) << 8) |
-      (data[offset + 3] as number)) >>>
-      0)
-  );
 }

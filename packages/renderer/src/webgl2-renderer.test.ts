@@ -128,4 +128,54 @@ describe('WebGL2Renderer', () => {
     expect(gl.drawArrays).toHaveBeenCalledTimes(drawsBeforeLoss + 1);
     expect(afterRestore.closed).toBe(true);
   });
+
+  it('shader compilation failure surfaces RendererError and still closes the frame', () => {
+    const gl = createFakeGL({ failShaderCompile: true });
+    const canvas = createFakeCanvas(gl);
+    const renderer = new WebGL2Renderer(canvas);
+    const frame = new FakeVideoFrame();
+
+    expect(() => renderer.draw(toFrame(frame))).toThrow('shader compilation failed');
+    expect(frame.closed).toBe(true);
+  });
+
+  it('program link failure surfaces RendererError and still closes the frame', () => {
+    const gl = createFakeGL({ failProgramLink: true });
+    const canvas = createFakeCanvas(gl);
+    const renderer = new WebGL2Renderer(canvas);
+    const frame = new FakeVideoFrame();
+
+    expect(() => renderer.draw(toFrame(frame))).toThrow('program link failed');
+    expect(frame.closed).toBe(true);
+  });
+
+  it('failed program creation surfaces RendererError and still closes the frame', () => {
+    const gl = createFakeGL({ failCreateProgram: true });
+    const canvas = createFakeCanvas(gl);
+    const renderer = new WebGL2Renderer(canvas);
+    const frame = new FakeVideoFrame();
+
+    expect(() => renderer.draw(toFrame(frame))).toThrow('program creation failed');
+    expect(frame.closed).toBe(true);
+  });
+
+  it('failed buffer creation surfaces RendererError and still closes the frame', () => {
+    const gl = createFakeGL({ failCreateBuffer: true });
+    const canvas = createFakeCanvas(gl);
+    const renderer = new WebGL2Renderer(canvas);
+    const frame = new FakeVideoFrame();
+
+    expect(() => renderer.draw(toFrame(frame))).toThrow('buffer creation failed');
+    expect(frame.closed).toBe(true);
+  });
+
+  it('failed texture creation surfaces RendererError and still closes the frame', () => {
+    const gl = createFakeGL({ failCreateTexture: true });
+    const canvas = createFakeCanvas(gl);
+    const renderer = new WebGL2Renderer(canvas);
+    const frame = new FakeVideoFrame();
+
+    expect(() => renderer.draw(toFrame(frame))).toThrow('texture creation failed');
+    expect(frame.closed).toBe(true);
+  });
 });

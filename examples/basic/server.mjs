@@ -9,7 +9,7 @@
 //   node server.mjs --port 9000 --loop   # repeat the stream forever
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -67,7 +67,7 @@ function resolveAlias(pathname) {
     if (filePath !== route.root && !filePath.startsWith(route.root + sep)) {
       return null; // path traversal
     }
-    return { filePath, mimes: route.mimes };
+    return { filePath, root: route.root, mimes: route.mimes };
   }
   return null;
 }
@@ -144,20 +144,27 @@ const server = createServer((req, res) => {
   let data = null;
   if (filePath !== null) {
     try {
-      data = readFileSync(filePath);
+      // Realpath check: the string-prefix guards prevent `..` escapes, but a
+      // symlink inside a served root pointing outside it would still be read.
+      // Resolve the canonical path and confirm it stays under the allowed root.
+      const root = alias !== null ? alias.root : resolve(DIST_DIR);
+      const real = realpathSync(filePath);
+      if (real === root || real.startsWith(root + sep)) {
+        data = readFileSync(real);
+      }
     } catch {
       data = null;
     }
   }
   if (data === null) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
     res.end('not found');
     return;
   }
 
   const mimes = alias !== null ? alias.mimes : MIME_TYPES;
   const mime = mimes[extname(filePath).toLowerCase()] ?? 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': mime, 'Content-Length': data.length });
+  res.writeHead(200, { 'Content-Type': mime, 'Content-Length': data.length, 'X-Content-Type-Options': 'nosniff' });
   res.end(data);
 });
 
