@@ -1,7 +1,8 @@
 import type { EncodedVideoChunkData } from '@vigilkit/plugin-sdk';
 import { JitterBuffer } from './jitter-buffer.js';
 import { AvSyncClock } from './av-sync.js';
-import { DECODER_HIGH_WATER, VideoDecoderWrapper } from './decoder.js';
+import { DECODER_HIGH_WATER } from './decoder.js';
+import type { VideoCodecDecoder } from './decoder.js';
 import type { RendererSurface } from './types.js';
 
 export interface SchedulerStats {
@@ -23,7 +24,7 @@ export interface SchedulerOptions {
  * jitter buffer while the decoder is at the high-water mark.
  */
 export class Scheduler {
-  private readonly decoder: VideoDecoderWrapper;
+  private readonly decoder: VideoCodecDecoder;
   private readonly jitter = new JitterBuffer<EncodedVideoChunkData>();
   private readonly clock: AvSyncClock;
   private readonly renderer: RendererSurface | null;
@@ -36,7 +37,7 @@ export class Scheduler {
   private readonly decodeTimes: number[] = [];
 
   constructor(
-    decoder: VideoDecoderWrapper,
+    decoder: VideoCodecDecoder,
     renderer: RendererSurface | null,
     options: SchedulerOptions = {},
   ) {
