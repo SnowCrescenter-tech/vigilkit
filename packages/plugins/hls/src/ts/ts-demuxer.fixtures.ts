@@ -185,6 +185,7 @@ export function collect(demuxer: TsDemuxer): DemuxerEvent[] {
 export type VideoEvent = Extract<DemuxerEvent, { type: 'video' }>;
 export type SeqEvent = Extract<DemuxerEvent, { type: 'sequence-header' }>;
 export type AudioEvent = Extract<DemuxerEvent, { type: 'audio' }>;
+export type AudioConfigEvent = Extract<DemuxerEvent, { type: 'audio-config' }>;
 export type MetaEvent = Extract<DemuxerEvent, { type: 'metadata' }>;
 
 export function readU32BE(data: Uint8Array): number {

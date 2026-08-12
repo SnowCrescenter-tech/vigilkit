@@ -1,5 +1,5 @@
 import type { Demuxer, DemuxerEvent } from '@vigilkit/plugin-sdk';
-import { buildAvcC, codecStringFromSps } from '@vigilkit/media-utils';
+import { MediaFormatError, adtsToConfig, buildAvcC, codecStringFromSps, stripAdts } from '@vigilkit/media-utils';
 import { parseAdtsHeader } from './adts.js';
 import { rebuildAvcc, splitNalus } from './es.js';
 import { TsPacketizer, parsePacket } from './packet.js';
@@ -34,6 +34,7 @@ export class TsDemuxer implements Demuxer {
   private sps: Uint8Array | null = null;
   private pps: Uint8Array | null = null;
   private hasSeqHeader = false;
+  private audioConfigEmitted = false;
   private audioMetaEmitted = false;
   private hasVideoStream = false;
   private hasAudioStream = false;
@@ -70,6 +71,7 @@ export class TsDemuxer implements Demuxer {
     this.sps = null;
     this.pps = null;
     this.hasSeqHeader = false;
+    this.audioConfigEmitted = false;
     this.audioMetaEmitted = false;
     this.hasVideoStream = false;
     this.hasAudioStream = false;
@@ -221,8 +223,32 @@ export class TsDemuxer implements Demuxer {
         continue;
       }
       if (this.adtsCarry.length < header.frameLength) break;
-      const raw = this.adtsCarry.slice(0, header.frameLength);
+      let payload: Uint8Array;
+      try {
+        payload = stripAdts(this.adtsCarry);
+      } catch (error) {
+        // stripAdts can reject a frame parseAdtsHeader accepted (a declared
+        // frameLength at or below the header length). Skip one byte and
+        // resync rather than leaking a format error out of push().
+        if (error instanceof MediaFormatError) {
+          this.adtsCarry = this.adtsCarry.slice(1);
+          continue;
+        }
+        throw error;
+      }
       this.adtsCarry = this.adtsCarry.slice(header.frameLength);
+      if (!this.audioConfigEmitted) {
+        this.audioConfigEmitted = true;
+        this.emit({
+          type: 'audio-config',
+          config: adtsToConfig({
+            profile: header.profile,
+            sampleRateIndex: header.sampleRateIndex,
+            sampleRate: header.sampleRate,
+            channels: header.channels,
+          }),
+        });
+      }
       if (!this.audioMetaEmitted) {
         this.audioMetaEmitted = true;
         this.emit({
@@ -235,7 +261,9 @@ export class TsDemuxer implements Demuxer {
           },
         });
       }
-      this.emit({ type: 'audio', chunk: { type: 'key', timestamp, data: raw } });
+      // Chunks carry the stripped AAC payload (no ADTS header); the
+      // audio-config event above provides the decoder configuration.
+      this.emit({ type: 'audio', chunk: { type: 'key', timestamp, data: payload } });
     }
   }
 

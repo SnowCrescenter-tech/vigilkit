@@ -27,7 +27,7 @@ import {
   u32,
   unrecognizedPmtSection,
 } from './ts-demuxer.fixtures.js';
-import type { AudioEvent, MetaEvent, SeqEvent, VideoEvent } from './ts-demuxer.fixtures.js';
+import type { AudioConfigEvent, AudioEvent, MetaEvent, SeqEvent, VideoEvent } from './ts-demuxer.fixtures.js';
 
 // --- Tests ----------------------------------------------------------------
 
@@ -55,7 +55,7 @@ describe('TsDemuxer', () => {
     expect(readU32BE(key?.chunk.data as Uint8Array)).toBe(SPS.length);
   });
 
-  it('emits audio metadata and raw ADTS chunks', () => {
+  it('emits an audio-config event, audio metadata and stripped AAC audio chunks', () => {
     const demuxer = new TsDemuxer();
     const events = collect(demuxer);
     demuxer.push(buildSegment());
@@ -67,7 +67,35 @@ describe('TsDemuxer', () => {
     const audios = events.filter((event): event is AudioEvent => event.type === 'audio');
     expect(audios.length).toBeGreaterThanOrEqual(1);
     expect(audios[0]?.chunk.type).toBe('key');
-    expect(audios[0]?.chunk.data[0]).toBe(0xff);
+    // The ADTS header is stripped: chunk data starts with the AAC raw payload.
+    expect(audios[0]?.chunk.data[0]).not.toBe(0xff);
+  });
+
+  it('emits an audio-config event from the first ADTS frame', () => {
+    const demuxer = new TsDemuxer();
+    const events = collect(demuxer);
+    demuxer.push(buildSegment());
+    demuxer.flush();
+
+    const configs = events.filter((e): e is AudioConfigEvent => e.type === 'audio-config');
+    expect(configs).toHaveLength(1);
+    expect(configs[0]?.config.codec).toBe('mp4a.40.2');
+    expect(configs[0]?.config.sampleRate).toBe(44100);
+    expect(configs[0]?.config.numberOfChannels).toBe(2);
+    expect(configs[0]?.config.description).toEqual(new Uint8Array([0x12, 0x10]));
+  });
+
+  it('audio chunks carry the stripped AAC payload (no ADTS header)', () => {
+    const demuxer = new TsDemuxer();
+    const events = collect(demuxer);
+    demuxer.push(buildSegment());
+    demuxer.flush();
+
+    const audios = events.filter((event): event is AudioEvent => event.type === 'audio');
+    expect(audios.length).toBeGreaterThanOrEqual(1);
+    // The fixture frame has a 7-byte header (protection_absent = 1).
+    expect(audios[0]?.chunk.data.length).toBe(adtsFrame().length - 7);
+    expect(audios[0]?.chunk.data[0]).not.toBe(0xff);
   });
 
   it('keeps output timestamps monotonic across a PTS rollback', () => {
@@ -234,8 +262,9 @@ describe('TsDemuxer', () => {
 
     const audios = events.filter((event): event is AudioEvent => event.type === 'audio');
     expect(audios).toHaveLength(1);
-    expect(audios[0]?.chunk.data.length).toBe(17);
-    expect(audios[0]?.chunk.data).toEqual(frame);
+    // The ADTS header (7 bytes, no CRC) is stripped from the emitted chunk.
+    expect(audios[0]?.chunk.data.length).toBe(17 - 7);
+    expect(audios[0]?.chunk.data).toEqual(frame.slice(7));
     // The emitted chunk carries the second PES's PTS (2 s @ 90 kHz), not the first.
     expect(audios[0]?.chunk.timestamp).toBeCloseTo(2_000_000, 0);
   });
@@ -257,6 +286,6 @@ describe('TsDemuxer', () => {
 
     const audios = events.filter((event): event is AudioEvent => event.type === 'audio');
     expect(audios).toHaveLength(1);
-    expect(audios[0]?.chunk.data).toEqual(frame);
+    expect(audios[0]?.chunk.data).toEqual(frame.slice(7));
   });
 });
