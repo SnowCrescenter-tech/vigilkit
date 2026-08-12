@@ -130,16 +130,19 @@ export interface FakeCanvas extends HTMLCanvasElement {
 
 /**
  * Fake HTMLCanvasElement. `gl` decides what getContext('webgl2') returns;
- * `ctx2d` what getContext('2d') returns. Records listeners so tests can fire
- * webglcontextlost / webglcontextrestored.
+ * `ctx2d` what getContext('2d') returns; `webgpu` what getContext('webgpu')
+ * returns. Records listeners so tests can fire webglcontextlost /
+ * webglcontextrestored.
  */
 export function createFakeCanvas(
   gl: FakeGL | null,
   ctx2d: unknown = null,
+  webgpu: unknown = null,
 ): FakeCanvas {
   const getContextMock = vi.fn((type: string) => {
     if (type === 'webgl2') return gl;
     if (type === '2d') return ctx2d;
+    if (type === 'webgpu') return webgpu;
     return null;
   });
   const listeners = new Map<string, Array<(e: unknown) => void>>();

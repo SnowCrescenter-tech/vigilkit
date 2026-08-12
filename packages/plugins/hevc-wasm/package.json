@@ -1,7 +1,7 @@
 {
-  "name": "@vigilkit/renderer",
+  "name": "@vigilkit/plugin-hevc-wasm",
   "version": "0.1.0",
-  "description": "WebGL2 and Canvas2D VideoFrame renderers for vigilkit",
+  "description": "LGPL libde265 (WASM) soft-decoder adapter for vigilkit's VideoCodecDecoder interface",
   "type": "module",
   "license": "Apache-2.0",
   "sideEffects": false,
@@ -17,11 +17,14 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@vigilkit/plugin-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@webgpu/types": "^0.1.65",
+    "@types/node": "^22.0.0",
     "vigilkit": "workspace:*"
-  },
-  "dependencies": {}
+  }
 }
