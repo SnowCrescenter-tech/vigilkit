@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { TransportEvent } from '@vigilkit/plugin-sdk';
 import {
-  TransportError,
   WebSocketTransport,
   type WebSocketConstructor,
 } from '../src/index.js';
 
 const CONNECTING = 0;
 const OPEN = 1;
-const CLOSING = 2;
 const CLOSED = 3;
 
 /**

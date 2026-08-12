@@ -1,5 +1,5 @@
 export class TransportError extends Error {
-  readonly code: 'TRANSPORT' = 'TRANSPORT';
+  readonly code = 'TRANSPORT' as const;
 
   constructor(message: string) {
     super(message);
