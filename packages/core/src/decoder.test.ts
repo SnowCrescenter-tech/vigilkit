@@ -98,6 +98,107 @@ describe('VideoDecoderWrapper', () => {
     expect(fake.resetCount).toBe(2);
   });
 
+  it('close called twice does not throw and the second call is a no-op', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    expect(() => {
+      wrapper.close();
+      wrapper.close();
+    }).not.toThrow();
+    expect(fake.closed).toBe(true);
+    expect(FakeVideoDecoder.instances).toHaveLength(1);
+  });
+
+  it('close then reset does not throw', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    wrapper.close();
+    expect(() => wrapper.reset()).not.toThrow();
+    expect(fake.resetCount).toBe(0);
+  });
+
+  it('close then configure creates a fresh decoder', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const first = getFake()!;
+    wrapper.close();
+    wrapper.configure({ codec: 'vp8' });
+    const second = getFake()!;
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(FakeVideoDecoder.instances).toHaveLength(2);
+  });
+
+  it('decode after close does not throw', () => {
+    const { wrapper } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    wrapper.close();
+    expect(() => {
+      wrapper.decode({ type: 'key', timestamp: 0, data: new Uint8Array([1]) });
+    }).not.toThrow();
+  });
+
+  it('flush after close resolves without touching the decoder', async () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    wrapper.close();
+    await expect(wrapper.flush()).resolves.toBeUndefined();
+    expect(fake.flushCount).toBe(0);
+  });
+
+  it('close is a no-op when the native decoder already closed itself', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    fake.close(); // native decoder closed itself (e.g. after a fatal decode error)
+    expect(() => wrapper.close()).not.toThrow();
+    wrapper.configure({ codec: 'vp8' });
+    expect(getFake()).not.toBe(fake);
+    expect(FakeVideoDecoder.instances).toHaveLength(2);
+  });
+
+  it('reset is a no-op when the native decoder already closed itself', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    fake.close();
+    expect(() => wrapper.reset()).not.toThrow();
+    expect(fake.resetCount).toBe(0);
+  });
+
+  it('flush resolves when the native decoder already closed itself', async () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    fake.close();
+    await expect(wrapper.flush()).resolves.toBeUndefined();
+    expect(fake.flushCount).toBe(0);
+  });
+
+  it('configure after the native decoder closed itself creates a fresh decoder', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const first = getFake()!;
+    first.close();
+    wrapper.configure({ codec: 'vp8' });
+    expect(getFake()).not.toBe(first);
+    expect(FakeVideoDecoder.instances).toHaveLength(2);
+  });
+
+  it('decode when the native decoder already closed itself does not throw or forward', () => {
+    const { wrapper, getFake } = makeWrapper();
+    wrapper.configure({ codec: 'vp8' });
+    const fake = getFake()!;
+    fake.close();
+    expect(() => {
+      wrapper.decode({ type: 'key', timestamp: 0, data: new Uint8Array([1]) });
+    }).not.toThrow();
+    expect(fake.decodeCalls).toHaveLength(0);
+  });
+
   it('flush resolves and forwards to the decoder', async () => {
     const { wrapper, getFake } = makeWrapper();
     wrapper.configure({ codec: 'vp8' });

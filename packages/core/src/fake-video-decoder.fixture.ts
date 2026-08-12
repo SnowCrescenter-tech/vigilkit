@@ -52,6 +52,7 @@ export class FakeVideoDecoder {
   }
 
   configure(config: VideoDecoderConfig): void {
+    this.assertOpen();
     if (this.failConfigure) {
       throw new Error('configure failed');
     }
@@ -60,6 +61,7 @@ export class FakeVideoDecoder {
   }
 
   decode(chunk: EncodedVideoChunk): void {
+    this.assertOpen();
     this.decodeCalls.push(chunk);
     this.decodeQueueSize++;
     const frame = new FakeVideoFrame(chunk.timestamp) as unknown as VideoFrame;
@@ -69,18 +71,28 @@ export class FakeVideoDecoder {
   }
 
   flush(): Promise<void> {
+    this.assertOpen();
     this.flushCount++;
     return Promise.resolve();
   }
 
   reset(): void {
+    this.assertOpen();
     this.resetCount++;
     this.state = 'unconfigured';
   }
 
   close(): void {
+    this.assertOpen();
     this.closed = true;
     this.state = 'closed';
+  }
+
+  /** Mirrors native WebCodecs: any method call on a closed codec throws. */
+  private assertOpen(): void {
+    if (this.state === 'closed') {
+      throw new Error('Cannot call on a closed codec.');
+    }
   }
 
   triggerError(error: unknown): void {

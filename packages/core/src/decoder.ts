@@ -50,7 +50,10 @@ export class VideoDecoderWrapper {
 
   configure(config: VideoDecoderConfig): void {
     try {
-      if (this.decoder === null) {
+      if (this.decoder === null || this.decoder.state === 'closed') {
+        // A null reference (after close()) or a decoder that closed itself
+        // (e.g. after a fatal decode error) must not be reused: build a fresh
+        // native decoder.
         this.decoder = this.factory({
           output: (frame) => this.deliverOutput(frame),
           error: (error) => this.handleError(error),
@@ -63,7 +66,7 @@ export class VideoDecoderWrapper {
   }
 
   decode(chunk: EncodedVideoChunkData): void {
-    if (this.decoder === null) {
+    if (this.decoder === null || this.decoder.state === 'closed') {
       this.surfaceError(mediaError('DECODE', 'decode called before configure'));
       return;
     }
@@ -81,22 +84,24 @@ export class VideoDecoderWrapper {
   }
 
   flush(): Promise<void> {
-    if (this.decoder === null) {
+    if (this.decoder === null || this.decoder.state === 'closed') {
       return Promise.resolve();
     }
     return this.decoder.flush();
   }
 
   close(): void {
-    if (this.decoder !== null) {
+    if (this.decoder !== null && this.decoder.state !== 'closed') {
       this.decoder.close();
-      this.decoder = null;
     }
+    // Drop the reference so a later configure() builds a new decoder and any
+    // further close()/reset()/decode() call is a guarded no-op.
+    this.decoder = null;
     this.outputs.length = 0;
   }
 
   reset(): void {
-    if (this.decoder !== null) {
+    if (this.decoder !== null && this.decoder.state !== 'closed') {
       this.decoder.reset();
     }
     this.outputs.length = 0;
