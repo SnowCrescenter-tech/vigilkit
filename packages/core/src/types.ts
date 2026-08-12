@@ -15,6 +15,7 @@ export interface PlayerStats {
   framesDecoded: number;
   framesDropped: number;
   fps: number;
+  audioFramesDecoded: number;
   errors: MediaErrorInfo[];
 }
 
@@ -36,6 +37,10 @@ export interface PlayerOptions {
    * falling back to setInterval (30ms) in non-browser runtimes.
    */
   pump?: { requestFrame?: (cb: () => void) => number; cancelFrame?: (id: number) => void };
+  /** Enable the audio decode + WebAudio output pipeline. Default true. */
+  audio?: boolean;
+  /** Injectable wall clock in ms for tests; defaults to performance.now. */
+  now?: () => number;
 }
 
 export interface PlayerEvents {

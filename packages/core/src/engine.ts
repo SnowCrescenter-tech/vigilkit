@@ -9,6 +9,9 @@ import type {
 import { buildDecoder } from './decoder-chain.js';
 import { nativeDecoderFactory } from './decoder.js';
 import type { VideoCodecDecoder, VideoDecoderFactory } from './decoder.js';
+import { nativeAudioDecoderFactory, type AudioDecoderFactory } from './audio-decoder.js';
+import { AudioPipeline } from './audio-pipeline.js';
+import { MasterClock } from './master-clock.js';
 import { Scheduler } from './scheduler.js';
 import { SourceBranch } from './source-branch.js';
 import { TransportPipeline } from './transport-pipeline.js';
@@ -24,29 +27,42 @@ import type { Player, PlayerEvents, PlayerOptions, PlayerState, PlayerStats } fr
  * (rAF in browsers, interval fallback elsewhere).
  */
 export class Engine implements Player {
-  private readonly options: PlayerOptions;
   private readonly registry = new PluginRegistry();
   private readonly emitter = new Emitter<PlayerEvents>();
   private readonly decoder: VideoCodecDecoder;
   private readonly scheduler: Scheduler;
   private readonly pump: Pump;
+  private readonly masterClock: MasterClock;
   private readonly errors: MediaErrorInfo[] = [];
   private readonly pipeline: TransportPipeline;
   private readonly sourceBranch = new SourceBranch();
+  private readonly audioPipeline: AudioPipeline;
   private state: PlayerState = 'idle';
   private destroyed = false;
   private pluginsRegistered = false;
   private metadata: StreamMetadata | null = null;
+  /** Direct-decoded frames (e.g. WHEP) counted like scheduler-decoded frames. */
+  private directFrames = 0;
 
-  constructor(options: PlayerOptions, decoderFactory?: VideoDecoderFactory) {
-    this.options = options;
+  constructor(private readonly options: PlayerOptions, decoderFactory?: VideoDecoderFactory, audioDecoderFactory?: AudioDecoderFactory) {
+    this.masterClock = new MasterClock({ now: options.now });
     this.decoder = buildDecoder({
       createWebCodecs: decoderFactory ?? nativeDecoderFactory,
       softFactory: options.softDecoder?.factory,
       forceSoft: options.forceSoft,
     });
+    this.audioPipeline = new AudioPipeline({
+      enabled: options.audio !== false,
+      decoderFactory: audioDecoderFactory ?? nativeAudioDecoderFactory,
+      onFirstAudio: (output) => {
+        this.masterClock.attachAudio(output);
+        this.scheduler.resync();
+      },
+      onError: (info) => this.handleError(info),
+    });
     this.decoder.onError((info) => this.handleError(info));
     this.scheduler = new Scheduler(this.decoder, options.renderer, {
+      now: () => this.masterClock.nowMs(),
       onFrame: (frame, ptsUs) => this.emitter.emit('frame', { frame, ptsUs }),
       onError: (info) => this.handleError(info),
     });
@@ -96,6 +112,7 @@ export class Engine implements Player {
     this.pipeline.teardown();
     this.sourceBranch.disconnect();
     this.decoder.close();
+    this.audioPipeline.destroy();
     this.options.renderer?.destroy();
     this.state = 'stopped';
   }
@@ -108,9 +125,10 @@ export class Engine implements Player {
     const s = this.scheduler.getStats();
     return {
       state: this.state,
-      framesDecoded: s.framesDecoded,
+      framesDecoded: s.framesDecoded + this.directFrames,
       framesDropped: s.framesDropped,
       fps: s.fps,
+      audioFramesDecoded: this.audioPipeline.decodedFrameCount,
       errors: [...this.errors],
     };
   }
@@ -211,8 +229,24 @@ export class Engine implements Player {
       case 'video':
         this.scheduler.enqueue(event.chunk);
         break;
+      case 'audio-config':
       case 'audio':
-        // v0.1 is video-only.
+        this.audioPipeline.handle(event);
+        break;
+      case 'frame':
+        this.directFrames++;
+        if (this.options.renderer !== null) {
+          try {
+            this.options.renderer.draw(event.frame);
+          } catch (error) {
+            // Mirror the scheduler's decoder-output path: a throwing renderer
+            // must surface as a RENDERER error, never escape the source loop.
+            const message = error instanceof Error ? error.message : 'renderer draw failed';
+            this.handleError(mediaError('RENDERER', message));
+          }
+        } else {
+          event.frame.close();
+        }
         break;
       case 'error':
         this.handleError(event.error);

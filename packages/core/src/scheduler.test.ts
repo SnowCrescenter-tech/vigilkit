@@ -178,4 +178,25 @@ describe('Scheduler', () => {
     expect(renderer.draw).toHaveBeenCalledTimes(2);
     expect(scheduler.getStats().framesDecoded).toBe(2);
   });
+
+  it('resync re-bases the clock on the next enqueue', () => {
+    let nowMs = 0;
+    const renderer = fakeRenderer();
+    const { scheduler } = makeScheduler(renderer, { now: () => nowMs, latencyBudgetMs: 1000 });
+    scheduler.enqueue(chunk(1000)); // base: pts 1000 @ wall 0
+    scheduler.tick();
+    expect(scheduler.getStats().framesDecoded).toBe(1);
+    // Same pts far in the future: without a re-base it is hopelessly late.
+    nowMs = 10_000;
+    scheduler.enqueue(chunk(1000));
+    scheduler.tick();
+    expect(scheduler.getStats().framesDropped).toBe(1);
+    expect(scheduler.getStats().framesDecoded).toBe(1);
+    // resync clears the base so the next enqueue re-bases to the new master.
+    scheduler.resync();
+    scheduler.enqueue(chunk(1000));
+    scheduler.tick();
+    expect(scheduler.getStats().framesDropped).toBe(1);
+    expect(scheduler.getStats().framesDecoded).toBe(2);
+  });
 });
