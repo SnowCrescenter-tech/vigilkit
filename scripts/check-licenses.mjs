@@ -8,6 +8,16 @@
 // Blocklist (hard failure): GPL / AGPL / LGPL, any variant.
 // Allowlist (warn only when unknown): Apache-2.0, MIT, ISC, BSD-2-Clause,
 // BSD-3-Clause, 0BSD, CC0-1.0, CC-BY-*, Unlicense.
+//
+// Vendored-artifact policy: LGPL is never allowed as a dependency (the scan
+// above enforces that). The one sanctioned exception is a physically isolated,
+// runtime-loaded WASM artifact that is not an npm dependency and never enters
+// the package graph, e.g. the libde265 HEVC decoder vendored under
+// examples/basic/vendor/ and loaded by @vigilkit/plugin-hevc-wasm with a
+// sha256 check. Those files are not in the dependency tree, so they cannot
+// appear here; their LGPL source offer is documented in
+// examples/basic/vendor/README.md, the plugin NOTICE, and
+// THIRD-PARTY-NOTICES.md (see the "Vendored artifacts" section).
 
 import { writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
