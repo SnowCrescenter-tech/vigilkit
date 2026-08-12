@@ -144,7 +144,6 @@ async function resolveEsmFactory(
       throw new Error(`libde265: failed to fetch ESM from ${esmUrl}`);
     }
     const source = await esmResponse.text();
-    // eslint-disable-next-line no-new-func -- required for the CSP fallback
     const factory: unknown = new Function(
       source.replace(/export default Module;\s*$/, '') + '; return Module;',
     )();

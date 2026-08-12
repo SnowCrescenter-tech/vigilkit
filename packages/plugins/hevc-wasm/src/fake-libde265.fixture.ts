@@ -8,8 +8,6 @@ import type {
 /** Subsampling factors per libde265 chroma format. */
 export function chromaDims(
   chroma: number,
-  width: number,
-  height: number,
 ): { subW: number; subH: number } {
   switch (chroma) {
     case 2: // 4:2:2
@@ -38,7 +36,7 @@ export class FakeImage implements Libde265Image {
     this.chromaFormat = chroma;
     this.bitsPerPixel = bitsPerPixel;
     this.isFullRange = isFullRange;
-    const { subW, subH } = chromaDims(chroma, width, height);
+    const { subW, subH } = chromaDims(chroma);
     const sampleBytes = bitsPerPixel > 8 ? 2 : 1;
     const y = new Uint8Array(width * height * sampleBytes);
     const u = new Uint8Array((width / subW) * (height / subH) * sampleBytes);
@@ -50,12 +48,12 @@ export class FakeImage implements Libde265Image {
   }
 
   getWidth(channel: number): number {
-    const { subW } = chromaDims(this.chromaFormat, this.width, this.height);
+    const { subW } = chromaDims(this.chromaFormat);
     return channel === 0 ? this.width : this.width / subW;
   }
 
   getHeight(channel: number): number {
-    const { subH } = chromaDims(this.chromaFormat, this.width, this.height);
+    const { subH } = chromaDims(this.chromaFormat);
     return channel === 0 ? this.height : this.height / subH;
   }
 

@@ -70,7 +70,6 @@ describe('loadLibde265', () => {
   it('falls back to evaluating the ESM text when importImpl is unavailable', async () => {
     const wasmBytes = new Uint8Array([5, 6, 7, 8]);
     const expected = await sha256Hex(wasmBytes);
-    const module = fakeModule();
     // Mini ESM shaped like the vendored artifact: async factory + trailing default export.
     const esmText = `async function Module(options) {
       return options.wasmBinary ? { Decoder: class {}, Error: { OK: 0, ERROR_WAITING_FOR_INPUT_DATA: 13 }, Chroma: {}, isOk: () => true, getErrorText: () => '' } : null;

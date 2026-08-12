@@ -84,9 +84,12 @@ async function loadLibde265Module(): Promise<Libde265Module> {
 
 async function copyOut(frame: VideoFrame, ptsUs: number): Promise<void> {
   try {
-    const size = frame.allocationSize({ format: 'I420' });
+    // No explicit format: dedicated workers reject copyTo() with a non-RGB
+    // format argument; the frame's native format (I420 from libde265) is
+    // copied as-is.
+    const size = frame.allocationSize();
     const buffer = new ArrayBuffer(size);
-    const layout = await frame.copyTo(buffer, { format: 'I420' });
+    const layout = await frame.copyTo(buffer);
     const width = frame.codedWidth;
     const height = frame.codedHeight;
     frame.close();

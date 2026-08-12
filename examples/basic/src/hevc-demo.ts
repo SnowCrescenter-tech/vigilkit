@@ -2,11 +2,11 @@
 //
 // The engine's demuxer/source resolution has no HEVC source plugin yet, so the
 // demo bypasses createPlayer: it fetches the Annex-B fixture itself, splits it
-// on start codes, and feeds the chunks to a HevcSoftDecoder running in a Vite
-// module worker. The worker copies I420 planes into a transferable buffer; the
-// main thread builds the VideoFrame and draws it. If the worker path fails
-// (e.g. no VideoFrame in the worker), the main thread decodes directly via
-// the soft factory.
+// on start codes, and feeds the chunks to a HevcSoftDecoder. The main thread
+// is the primary decode path (proven in Node smoke + Chromium). A worker path
+// exists behind `?worker=1` as an experimental alternative: headless Chromium
+// wedges the vendored wasm inside dedicated workers (native spin, no message),
+// so the worker path is opt-in and timeout-guarded.
 
 import type { RendererSurface, SoftVideoDecoderFactory, VideoCodecDecoder } from 'vigilkit';
 import { createHevcSoftFactory } from '@vigilkit/plugin-hevc-wasm';
@@ -34,6 +34,7 @@ const WASM_SHA256 = '440c6bbc60af222e72141583ce583423b0b8dd3fe0b53e823fa2e99988e
 
 const FRAME_INTERVAL_US = 40_000; // 25 fps pacing for raw-stream chunk timestamps
 const STATE_STOPPED = 'stopped / 已断开';
+const WORKER_TIMEOUT_MS = 15_000;
 
 function requiredElement<T extends HTMLElement>(id: string, ctor: new () => T): T {
   const el = document.getElementById(id);
@@ -41,6 +42,13 @@ function requiredElement<T extends HTMLElement>(id: string, ctor: new () => T): 
     throw new Error(`#${id}: expected a <${ctor.name}> element in the DOM`);
   }
   return el;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
 }
 
 /** Splits an Annex-B stream into NAL-aligned chunks on 00 00 01 / 00 00 00 01 start codes. */
@@ -71,7 +79,7 @@ export function createHevcDemo(renderer: RendererSurface, onError: (info: ErrorI
   const stats = { framesDecoded: 0, errors: 0 };
   let worker: Worker | null = null;
   let decoder: VideoCodecDecoder | null = null;
-  let frameTimes: number[] = [];
+  const frameTimes: number[] = [];
 
   function pushFrameTime(now: number): void {
     frameTimes.push(now);
@@ -210,12 +218,18 @@ export function createHevcDemo(renderer: RendererSurface, onError: (info: ErrorI
         sha256: WASM_SHA256,
       });
       const chunks = splitAnnexB(bytes);
-      const workerOk = await runWorkerPath(chunks);
+      const useWorker = new URLSearchParams(location.search).get('worker') === '1';
+      let workerOk = false;
+      if (useWorker) {
+        workerOk = ((await withTimeout(runWorkerPath(chunks), WORKER_TIMEOUT_MS).catch(() => null)) ?? false);
+        if (workerOk) {
+          statusEl.textContent = `hevc: done (worker) — ${stats.framesDecoded} frames`;
+        } else {
+          console.warn('[vigilkit] hevc worker path failed/timed out; using main-thread decode');
+        }
+      }
       if (!workerOk) {
-        console.warn('[vigilkit] hevc worker path failed; falling back to main-thread decode');
         await runMainPath(chunks, softFactory);
-      } else {
-        statusEl.textContent = `hevc: done (worker) — ${stats.framesDecoded} frames`;
       }
     } catch (err) {
       onError({ code: 'TRANSPORT', message: err instanceof Error ? err.message : String(err) });

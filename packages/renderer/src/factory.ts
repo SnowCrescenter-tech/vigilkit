@@ -75,11 +75,15 @@ async function tryCreateWebGPU(
 ): Promise<WebGPURenderer | null> {
   if (gpu === undefined) return null;
   try {
-    const context = canvas.getContext('webgpu');
-    if (context === null) return null;
+    // Probe the adapter BEFORE touching the real canvas: getContext('webgpu')
+    // permanently locks a canvas to WebGPU, and a null adapter (common in
+    // headless/software environments) would then block the WebGL2/Canvas2D
+    // fallbacks. Adapter-first keeps the canvas untouched on failure.
     const adapter = await gpu.requestAdapter();
     if (adapter === null) return null;
     const device = await adapter.requestDevice();
+    const context = canvas.getContext('webgpu');
+    if (context === null) return null;
     return new WebGPURenderer(canvas, device, context, {
       getPreferredFormat: () => gpu.getPreferredCanvasFormat(),
     });

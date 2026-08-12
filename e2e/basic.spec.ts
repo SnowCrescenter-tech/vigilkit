@@ -122,6 +122,13 @@ test('plays WS-FLV stream with WebCodecs and renders frames', async ({ page }) =
 
     await page.click('#connect');
     await waitForPlayerState(page, 'playing', 20000);
+
+    const renderMode = await page.evaluate(() => {
+      const api = (window as unknown as WindowWithVigilkit).__vigilkit;
+      return api.renderMode ?? null;
+    });
+    expect(['webgl2', 'webgpu'], `renderMode: ${String(renderMode)}`).toContain(renderMode);
+
     await waitForDecodeOrError(page, 20000);
 
     const current = await readStats(page);
