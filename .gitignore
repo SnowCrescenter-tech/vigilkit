@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+playwright-report/
+test-results/
+e2e/artifacts/
+.codegraph/
+.omo/
+.local/
+coverage/

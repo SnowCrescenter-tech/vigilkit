@@ -1,0 +1,31 @@
+{
+  "name": "vigilkit-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "test:e2e": "playwright test",
+    "fix:fixture": "node scripts/fetch-fixture.mjs",
+    "notices": "node scripts/check-licenses.mjs --generate-notices",
+    "check:licenses": "node scripts/check-licenses.mjs --ci"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@playwright/test": "^1.62.0",
+    "eslint": "^9.0.0",
+    "license-checker-rseidelsohn": "^5.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.0.0"
+  }
+}
