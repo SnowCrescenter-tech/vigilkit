@@ -13,7 +13,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "fix:fixture": "node scripts/fetch-fixture.mjs",
     "notices": "node scripts/check-licenses.mjs --generate-notices",
     "check:licenses": "node scripts/check-licenses.mjs --ci"
