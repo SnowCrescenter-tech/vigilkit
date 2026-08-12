@@ -53,6 +53,15 @@
 // window.__vigilkit surface used here (note: player stays null in hevc mode):
 //   hevc       -> { framesDecoded: number, errors: number }
 //   renderMode -> 'webgl2' | 'webgpu' | null
+//
+// FIREFOX PROJECT: this is the primary target for HEVC soft-decode (libde265
+// WASM). Firefox 130+ ships WebCodecs VideoFrame, and the main-thread decode
+// path (default in this spec) builds an I420 VideoFrame from the libde265
+// planes. If a firefox build cannot construct an I420 VideoFrame with an
+// explicit layout (the construction probe below throws), the test skips
+// gracefully with a documented reason instead of failing. The probe runs a
+// real 4x2 I420 construction; the skip engages ONLY when construction fails.
+// renderMode on firefox also allows 'canvas2d' (headless WebGL2 unreliable).
 
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -70,6 +79,34 @@ interface VigilkitApi {
 
 const ARTIFACTS_DIR = path.join(process.cwd(), 'e2e', 'artifacts');
 const HEVC_URL = 'http://localhost:8090/?source=hevc';
+
+/**
+ * Runtime probe: can this browser construct an I420 VideoFrame with an
+ * explicit plane layout? The libde265 main-thread path relies on exactly
+ * this construction, so a negative result means the soft-decode path cannot
+ * deliver frames in this build and the spec must skip (firefox only).
+ */
+async function probeVideoFrameI420(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    try {
+      const frame = new VideoFrame(new Uint8Array(16), {
+        format: 'I420',
+        codedWidth: 4,
+        codedHeight: 2,
+        timestamp: 0,
+        layout: [
+          { offset: 0, stride: 4 }, // Y plane: 4x2 = 8 bytes (offsets 0..7)
+          { offset: 8, stride: 2 }, // U plane: 2x1 = 2 bytes (offsets 8..9)
+          { offset: 10, stride: 2 }, // V plane: 2x1 = 2 bytes (offsets 10..11)
+        ],
+      });
+      frame.close();
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
 
 /** evaluate()/waitForFunction() callbacks are serialized: no outer value closures, only types. */
 type WindowWithVigilkit = Window & { __vigilkit: VigilkitApi };
@@ -170,11 +207,26 @@ async function runAttempt(
   };
 }
 
-test('soft-decodes HEVC via libde265 worker and renders frames', async ({ page }) => {
+test('soft-decodes HEVC via libde265 worker and renders frames', async ({ page }, testInfo) => {
   // worker init + wasm fetch + sha256 pin + decode can take several seconds;
   // the spec grants 60s for framesDecoded > 0, so the test needs headroom
   // beyond the 60s config timeout (plus one reload retry).
   test.setTimeout(180_000);
+  const project = testInfo.project.name;
+  // Headless Firefox: no WebGPU, unreliable WebGL2 -> canvas2d fallback.
+  const allowedRenderModes =
+    project === 'firefox' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
+
+  // Conditional, project-scoped skip: only firefox can lack I420 VideoFrame
+  // support; chromium always supports it. The probe constructs a real I420
+  // frame, so the skip engages ONLY when the soft-decode path's frame
+  // delivery cannot work in this build. If the probe passes, the spec runs
+  // in full (no unnecessary skip).
+  test.skip(
+    project === 'firefox' && !(await probeVideoFrameI420(page)),
+    'HEVC VideoFrame I420 construction unsupported in this firefox build',
+  );
+
   await page.addInitScript(HIDE_WEBGPU);
   const consoleLines: string[] = [];
   const pageErrors: string[] = [];
@@ -225,7 +277,7 @@ test('soft-decodes HEVC via libde265 worker and renders frames', async ({ page }
     expect(hevc?.errors, `hevc errors: ${JSON.stringify(hevc)}`).toBe(0);
 
     const renderMode = result.renderMode;
-    expect(['webgl2', 'webgpu'], `renderMode: ${String(renderMode)}`).toContain(renderMode);
+    expect(allowedRenderModes, `renderMode: ${String(renderMode)}`).toContain(renderMode);
   } finally {
     // Artifacts are written on success AND failure so a red run stays
     // diagnosable (console.log + stats.json + a UI screenshot).
