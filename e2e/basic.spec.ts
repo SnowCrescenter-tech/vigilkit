@@ -6,19 +6,11 @@
 // player.getStats() returns { state, framesDecoded, framesDropped, fps,
 // errors }.
 //
-// KNOWN DEFECT (found by this suite, Aug 2026): the player cannot decode in
-// real Chromium. @vigilkit/plugin-flv feeds the WebCodecs VideoDecoder a full
-// avcC record as `description` (which declares AVCC / length-prefixed chunk
-// format for the `avc1` codec) but converts every NALU packet to Annex-B
-// (naluToAnnexB in packages/plugins/flv/src/flv-demuxer.ts). Chrome 151
-// rejects the mismatch with "Unable to determine size of bitstream buffer."
-// Verified with an isolated decoder experiment: avcC description + AVCC
-// chunks decodes fine; avcC description + Annex-B chunks fails identically.
-// Fix (outside this directory's scope): keep length-prefixed NALUs when
-// providing the avcC description, or drop `description` and stay Annex-B.
-// Until then Test 1 is expected-red by design; it still captures full
-// diagnostic artifacts (console.log, stats.json, basic.png) on the failure
-// path.
+// HISTORY: an earlier AVCC/Annex-B framing defect (avcC description + Annex-B
+// chunks) made Test 1 expected-red in Aug 2026. That defect was fixed in
+// commit f22ad9e — the FLV demuxer now emits AVCC length-prefixed chunks to
+// match the avcC description, and both FLV tests are expected-green across
+// chromium + firefox.
 //
 // FIXTURE / PACING NOTE: the fixture is a ~11.6 s cut (352 video frames,
 // 426x240 @ 30 fps) of a 512 KiB FLV. The server ships the whole file in 8 x
