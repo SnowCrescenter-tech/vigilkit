@@ -33,6 +33,8 @@ importers:
         specifier: ^4.0.0
         version: 4.1.10(vite@8.2.1(esbuild@0.27.7))
 
+  packages/plugin-sdk: {}
+
 packages:
 
   '@esbuild/aix-ppc64@0.27.7':
