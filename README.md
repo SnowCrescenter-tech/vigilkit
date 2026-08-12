@@ -101,16 +101,25 @@ const softDecoder = await createHevcSoftFactory({
   esmUrl: '/vendor/libde265-esm.js',
   wasmUrl: '/vendor/libde265.wasm',
   sha256: '440c6bbc60af222e72141583ce583423b0b8dd3fe0b53e823fa2e99988eca5b8',
+  esmSha256: '3d431114c87569ff71b3a8f434c3a67ba8239fbef18cea80e2f22e5049d7b0ab',
 });
-// pass { softDecoder } to createPlayer; Firefox then soft-decodes HEVC
+// pass it as softDecoder: { factory: softDecoder } to createPlayer;
+// Firefox then soft-decodes HEVC — see the v0.3 caveat below
 ```
+
+> **v0.3 caveat:** the `softDecoder` / `forceSoft` options are wired end-to-end in the
+> engine's `CodecRoutingDecoder`, but no shipped source/demuxer plugin yet emits
+> `hvc1/hev1` configs (FLV H.265 and TS-HEVC demuxing are v0.3). The v0.2 HEVC
+> demo (`?source=hevc`) decodes **outside** `createPlayer`: it feeds the fixture
+> directly to `HevcSoftDecoder`. The engine-source integration is the first v0.3
+> item on the roadmap.
 
 ## HEVC support
 
 HEVC (H.265) has two decode paths, selected automatically by `CodecRoutingDecoder`:
 
 1. **Hardware decode via WebCodecs** where the browser exposes it (Chrome 107+, Safari 17.4+). Zero-copy, no extra downloads.
-2. **libde265 WASM soft-decode** everywhere else. This is the primary v0.2 story for Firefox, which has no HEVC WebCodecs at all. `@vigilkit/plugin-hevc-wasm` is an Apache-2.0 adapter around the LGPL-3.0 libde265 decoder, shipped as a **physically isolated vendored artifact** (never an npm dependency, never linked into any package's JavaScript). The wasm binary is sha256-pinned and verified at load time (`libde265.wasm` sha256 `440c6bbc…`), and the LGPL source offer is documented in the [vendor README](examples/basic/vendor/README.md) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+2. **libde265 WASM soft-decode** everywhere else. This is the primary v0.2 story for Firefox, which has no HEVC WebCodecs at all. `@vigilkit/plugin-hevc-wasm` is an Apache-2.0 adapter around the LGPL-3.0 libde265 decoder, shipped as a **physically isolated vendored artifact** (never an npm dependency, never linked into any package's JavaScript). Both the wasm binary and the ESM wrapper are sha256-pinned and verified at load time (`libde265.wasm` `440c6bbc…`, `libde265-esm.js` `3d431114…`), and the LGPL source offer is documented in the [vendor README](examples/basic/vendor/README.md) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Set `forceSoft: true` (plus a `softDecoder` factory) to force the soft path even where hardware exists. The default is WebCodecs-first with the async `isConfigSupported` probe.
 

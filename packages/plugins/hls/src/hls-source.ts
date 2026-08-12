@@ -138,6 +138,9 @@ export class HlsSource implements MediaSource {
     const headers: Record<string, string> = {};
     if (segment.byterange !== undefined) {
       const { length, offset } = segment.byterange;
+      if (!(length > 0 && offset >= 0)) {
+        throw hlsError('DEMUX', `invalid byterange ${length}@${offset}`);
+      }
       headers['Range'] = `bytes=${offset}-${offset + length - 1}`;
     }
     const response = await this.options.fetchImpl(url, { signal: this.signal(), headers });
@@ -157,11 +160,18 @@ export class HlsSource implements MediaSource {
 }
 
 function resolveUrl(base: string, uri: string): string {
+  let resolved: URL;
   try {
-    return new URL(uri, base).href;
+    resolved = new URL(uri, base);
   } catch {
     throw hlsError('DEMUX', `cannot resolve segment URI ${uri} against ${base}`);
   }
+  // Only http(s) segment/variant URIs are acceptable; a playlist must not be
+  // able to redirect the client at other schemes (javascript:, data:, file:).
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+    throw hlsError('DEMUX', `unsupported URL scheme ${resolved.protocol}`);
+  }
+  return resolved.href;
 }
 
 function errorMessage(error: unknown): string {

@@ -31,6 +31,8 @@ const VENDOR_ESM_URL = '/vendor/libde265-esm.js';
 const VENDOR_WASM_URL = '/vendor/libde265.wasm';
 /** Pinned SHA-256 of libde265.wasm (vendor/README.md); verified before instantiation. */
 const WASM_SHA256 = '440c6bbc60af222e72141583ce583423b0b8dd3fe0b53e823fa2e99988eca5b8';
+/** Pinned SHA-256 of libde265-esm.js (vendor/libde265.sha256); verified before any code executes. */
+const ESM_SHA256 = '3d431114c87569ff71b3a8f434c3a67ba8239fbef18cea80e2f22e5049d7b0ab';
 
 const FRAME_INTERVAL_US = 40_000; // 25 fps pacing for raw-stream chunk timestamps
 const STATE_STOPPED = 'stopped / 已断开';
@@ -216,6 +218,7 @@ export function createHevcDemo(renderer: RendererSurface, onError: (info: ErrorI
         esmUrl: VENDOR_ESM_URL,
         wasmUrl: VENDOR_WASM_URL,
         sha256: WASM_SHA256,
+        esmSha256: ESM_SHA256,
       });
       const chunks = splitAnnexB(bytes);
       const useWorker = new URLSearchParams(location.search).get('worker') === '1';

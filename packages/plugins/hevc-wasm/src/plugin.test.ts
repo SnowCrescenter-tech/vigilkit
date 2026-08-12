@@ -41,6 +41,7 @@ describe('createHevcSoftFactory', () => {
   it('loads the module and wraps it into a working factory', async () => {
     const module = fakeModule();
     const wasmBytes = new Uint8Array([1, 2, 3]);
+    const expected = await sha256Hex(wasmBytes);
     const importImpl = vi.fn(async () => ({
       default: async () => module,
     }));
@@ -52,6 +53,7 @@ describe('createHevcSoftFactory', () => {
     const factory = await createHevcSoftFactory({
       esmUrl: 'https://example.test/libde265-esm.js',
       wasmUrl: 'https://example.test/libde265.wasm',
+      sha256: expected,
       fetchImpl: fetchImpl as unknown as typeof fetch,
       importImpl,
     });
@@ -62,3 +64,8 @@ describe('createHevcSoftFactory', () => {
     expect(importImpl).toHaveBeenCalledWith('https://example.test/libde265-esm.js');
   });
 });
+
+async function sha256Hex(bytes: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}

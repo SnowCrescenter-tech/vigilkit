@@ -92,13 +92,13 @@ importers:
       '@vigilkit/plugin-sdk':
         specifier: workspace:*
         version: link:../../plugin-sdk
+      vigilkit:
+        specifier: workspace:*
+        version: link:../../core
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
-      vigilkit:
-        specifier: workspace:*
-        version: link:../../core
 
   packages/plugins/hls:
     dependencies:
@@ -120,13 +120,14 @@ importers:
         version: link:../../plugin-sdk
 
   packages/renderer:
+    dependencies:
+      vigilkit:
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@webgpu/types':
         specifier: ^0.1.65
         version: 0.1.71
-      vigilkit:
-        specifier: workspace:*
-        version: link:../core
 
 packages:
 
