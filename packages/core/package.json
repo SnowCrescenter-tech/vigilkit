@@ -1,0 +1,14 @@
+{
+  "name": "vigilkit",
+  "version": "0.1.0",
+  "description": "Microkernel media engine for vigilkit — zero third-party runtime deps",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": { "build": "tsup src/index.ts --format esm --dts --clean", "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@vigilkit/plugin-sdk": "workspace:*" }
+}
