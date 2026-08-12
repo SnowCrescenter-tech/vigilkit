@@ -29,6 +29,13 @@ export type DemuxerEvent =
   | { type: 'audio-config'; config: AudioDecoderConfig }      // DOM type (lib DOM)
   | { type: 'video'; chunk: EncodedVideoChunkData }
   | { type: 'audio'; chunk: EncodedAudioChunkData }
+  /**
+   * A direct-decoded frame from a source plugin (e.g. WebRTC/WHEP), bypassing
+   * the encoded decode chain. The frame is handed to the engine and MUST NOT
+   * be closed by the emitting source; the engine renders it (renderer takes
+   * ownership) or closes it when no renderer is attached.
+   */
+  | { type: 'frame'; frame: VideoFrame }
   | { type: 'error'; error: MediaErrorInfo };
 
 export type TransportEvent =
