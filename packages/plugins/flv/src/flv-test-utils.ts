@@ -11,6 +11,7 @@ export type VideoEvent = Extract<DemuxerEvent, { type: 'video' }>;
 export type SeqEvent = Extract<DemuxerEvent, { type: 'sequence-header' }>;
 export type MetadataEvent = Extract<DemuxerEvent, { type: 'metadata' }>;
 export type AudioEvent = Extract<DemuxerEvent, { type: 'audio' }>;
+export type AudioConfigEvent = Extract<DemuxerEvent, { type: 'audio-config' }>;
 
 export function u16(n: number): number[] {
   return [(n >> 8) & 0xff, n & 0xff];

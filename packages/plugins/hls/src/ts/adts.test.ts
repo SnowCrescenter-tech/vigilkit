@@ -18,6 +18,7 @@ describe('parseAdtsHeader', () => {
     const header = parseAdtsHeader(adtsFrame(17));
     expect(header.isAdts).toBe(true);
     expect(header.sampleRate).toBe(44100);
+    expect(header.sampleRateIndex).toBe(4);
     expect(header.channels).toBe(2);
     expect(header.profile).toBe(1);
     expect(header.frameLength).toBe(17);

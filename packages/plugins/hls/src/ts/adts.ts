@@ -1,6 +1,7 @@
 /** AAC ADTS frame header. */
 export interface AdtsHeader {
   sampleRate: number;
+  sampleRateIndex: number;
   channels: number;
   frameLength: number;
   profile: number;
@@ -16,7 +17,14 @@ const SAMPLE_RATES = [
  * or too short) returns `isAdts: false`.
  */
 export function parseAdtsHeader(data: Uint8Array): AdtsHeader {
-  const fail: AdtsHeader = { isAdts: false, sampleRate: 0, channels: 0, frameLength: 0, profile: 0 };
+  const fail: AdtsHeader = {
+    isAdts: false,
+    sampleRate: 0,
+    sampleRateIndex: 0,
+    channels: 0,
+    frameLength: 0,
+    profile: 0,
+  };
   if (data.length < 7 || (data[0] as number) !== 0xff || ((data[1] as number) & 0xf0) !== 0xf0) {
     return fail;
   }
@@ -28,5 +36,5 @@ export function parseAdtsHeader(data: Uint8Array): AdtsHeader {
     ((data[4] as number) << 3) |
     (((data[5] as number) >> 5) & 0x07);
   const sampleRate = SAMPLE_RATES[sampleRateIndex] ?? 0;
-  return { isAdts: true, sampleRate, channels, frameLength, profile };
+  return { isAdts: true, sampleRate, sampleRateIndex, channels, frameLength, profile };
 }

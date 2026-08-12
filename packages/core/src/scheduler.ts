@@ -62,6 +62,15 @@ export class Scheduler {
     this.jitter.push(chunk);
   }
 
+  /**
+   * Clears the clock base so the next enqueue re-bases it. Called by the
+   * engine when audio becomes the master clock: the video clock must realign
+   * to the audio media time instead of the wall clock.
+   */
+  resync(): void {
+    this.clockReset = false;
+  }
+
   tick(): void {
     const nowMs = this.now();
     for (;;) {

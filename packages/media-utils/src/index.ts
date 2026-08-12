@@ -13,3 +13,5 @@ export {
   naluToAnnexB,
   parseAvcC,
 } from './avc.js';
+export { adtsToConfig, ascToConfig, stripAdts } from './aac.js';
+export type { AdtsConfigInput } from './aac.js';

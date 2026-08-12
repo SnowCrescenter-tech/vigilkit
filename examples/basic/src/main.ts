@@ -6,9 +6,10 @@ import { hlsSourcePlugin } from '@vigilkit/plugin-hls';
 import { createRenderer, createRendererAsync } from '@vigilkit/renderer';
 import { createHevcDemo } from './hevc-demo';
 import type { ErrorInfo, HevcDemo } from './hevc-demo';
+import { createWhepPlayer } from './whep-demo';
 
-/** Demo mode, selected via `?source=flv|hls|hevc` on the page URL (default flv). */
-type DemoMode = 'flv' | 'hls' | 'hevc';
+/** Demo mode, selected via `?source=flv|hls|hevc|whep` on the page URL (default flv). */
+type DemoMode = 'flv' | 'hls' | 'hevc' | 'whep';
 
 const WS_URL = `ws://${location.host}/live`;
 const HLS_URL = `http://${location.host}/hls/master.m3u8`;
@@ -47,7 +48,7 @@ let demoActive = false;
 
 function resolveMode(): DemoMode {
   const source = new URLSearchParams(window.location.search).get('source');
-  if (source === 'hls' || source === 'hevc') {
+  if (source === 'hls' || source === 'hevc' || source === 'whep') {
     return source;
   }
   return 'flv';
@@ -114,6 +115,9 @@ function connect(): void {
     player.play();
   } else if (mode === 'hls') {
     player = buildHlsPlayer();
+    player.play();
+  } else if (mode === 'whep') {
+    player = createWhepPlayer(renderer, renderStats, renderError);
     player.play();
   } else if (hevcDemo !== null) {
     void hevcDemo.start();

@@ -16,6 +16,7 @@
     "@vigilkit/plugin-flv": "workspace:*",
     "@vigilkit/plugin-ws": "workspace:*",
     "@vigilkit/plugin-hls": "workspace:*",
+    "@vigilkit/plugin-whep": "workspace:*",
     "@vigilkit/plugin-hevc-wasm": "workspace:*",
     "@vigilkit/renderer": "workspace:*"
   },

@@ -1,7 +1,8 @@
-import { ByteReader, MediaFormatError, parseAvcC } from '@vigilkit/media-utils';
+import { ByteReader, MediaFormatError, ascToConfig, parseAvcC } from '@vigilkit/media-utils';
 import type { Demuxer, DemuxerEvent, StreamMetadata } from '@vigilkit/plugin-sdk';
 import { parseScriptData } from './amf0.js';
 import {
+  AacPacketType,
   AvcFrameType,
   AvcPacketType,
   HEADER_SIZE,
@@ -157,19 +158,11 @@ export class FlvDemuxer implements Demuxer {
     const metadata: StreamMetadata = {
       hasAudio: (this.flags & 4) !== 0,
       hasVideo: (this.flags & 1) !== 0,
+      ...(typeof meta.width === 'number' ? { width: meta.width } : {}),
+      ...(typeof meta.height === 'number' ? { height: meta.height } : {}),
+      ...(typeof meta.framerate === 'number' ? { framerate: meta.framerate } : {}),
+      ...(typeof meta.duration === 'number' ? { duration: meta.duration } : {}),
     };
-    if (typeof meta.width === 'number') {
-      metadata.width = meta.width;
-    }
-    if (typeof meta.height === 'number') {
-      metadata.height = meta.height;
-    }
-    if (typeof meta.framerate === 'number') {
-      metadata.framerate = meta.framerate;
-    }
-    if (typeof meta.duration === 'number') {
-      metadata.duration = meta.duration;
-    }
     this.emit({ type: 'metadata', metadata });
   }
 
@@ -188,15 +181,7 @@ export class FlvDemuxer implements Demuxer {
       try {
         this.emit({ type: 'sequence-header', config: parseAvcC(data.subarray(5)) });
       } catch (error) {
-        // media-utils throws MediaFormatError (code 'DEMUX') on malformed
-        // avcC; surface it through the demuxer's event surface like any
-        // other framing failure rather than leaking a foreign error type.
-        if (error instanceof MediaFormatError) {
-          this.emitError('DEMUX', error.message);
-          this.failed = true;
-          return;
-        }
-        throw error;
+        this.failOnFormatError(error);
       }
       return;
     }
@@ -231,12 +216,24 @@ export class FlvDemuxer implements Demuxer {
     if (soundFormat !== SoundFormat.AAC) {
       return;
     }
-    // v0.1: AAC is demuxed but not decoded — emit both seq headers and raw
-    // packets as 'audio' events.
-    this.emit({
-      type: 'audio',
-      chunk: { type: 'key', timestamp: timestampMs * 1000, data: data.subarray(2) },
-    });
+    const packetType = data[1] as number;
+    if (packetType === AacPacketType.SEQ) {
+      // The AAC sequence header carries the AudioSpecificConfig describing
+      // every RAW packet that follows. Emit it once as an audio-config event;
+      // RAW packets carry no ASC prefix.
+      try {
+        this.emit({ type: 'audio-config', config: ascToConfig(data.subarray(2)) });
+      } catch (error) {
+        this.failOnFormatError(error);
+      }
+      return;
+    }
+    if (packetType === AacPacketType.RAW) {
+      this.emit({
+        type: 'audio',
+        chunk: { type: 'key', timestamp: timestampMs * 1000, data: data.subarray(2) },
+      });
+    }
   }
 
   private hasValidSignature(): boolean {
@@ -252,6 +249,16 @@ export class FlvDemuxer implements Demuxer {
     message: string,
   ): void {
     this.emit({ type: 'error', error: { code, message } });
+  }
+
+  /** Emits a DEMUX error and fails the demuxer for a MediaFormatError. */
+  private failOnFormatError(error: unknown): void {
+    if (error instanceof MediaFormatError) {
+      this.emitError('DEMUX', error.message);
+      this.failed = true;
+    } else {
+      throw error;
+    }
   }
 
   private emit(event: DemuxerEvent): void {

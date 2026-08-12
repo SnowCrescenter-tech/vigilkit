@@ -44,6 +44,9 @@ importers:
       '@vigilkit/plugin-hls':
         specifier: workspace:*
         version: link:../../packages/plugins/hls
+      '@vigilkit/plugin-whep':
+        specifier: workspace:*
+        version: link:../../packages/plugins/whep
       '@vigilkit/plugin-ws':
         specifier: workspace:*
         version: link:../../packages/plugins/ws
@@ -112,6 +115,19 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+
+  packages/plugins/whep:
+    dependencies:
+      '@vigilkit/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@vigilkit/plugin-hls':
+        specifier: workspace:*
+        version: link:../hls
 
   packages/plugins/ws:
     dependencies:

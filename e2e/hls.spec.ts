@@ -31,6 +31,12 @@
 // renderer. renderMode must still be 'webgl2' (or 'webgpu'). The underlying
 // factory bug (probing WebGPU on the live canvas) is an app defect outside
 // this directory's scope.
+//
+// FIREFOX PROJECT: Firefox has no WebGPU and headless WebGL2 is unreliable,
+// so createRendererAsync can fall back to canvas2d — the firefox project
+// allows renderMode 'canvas2d' alongside 'webgl2' / 'webgpu'. The
+// framesDecoded > 0 bound is identical on both projects (H.264 WebCodecs
+// decode works in Firefox 130+).
 
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -129,8 +135,12 @@ async function waitForPlayingOrError(page: Page, timeoutMs: number): Promise<'pl
   return value;
 }
 
-test('plays HLS stream with WebCodecs and renders frames', async ({ page }) => {
+test('plays HLS stream with WebCodecs and renders frames', async ({ page }, testInfo) => {
   test.setTimeout(120_000); // 30s playing wait + 30s decode wait + fixture drain headroom
+  const project = testInfo.project.name;
+  // Headless Firefox: no WebGPU, unreliable WebGL2 -> canvas2d fallback.
+  const allowedRenderModes =
+    project === 'firefox' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
   await page.addInitScript(HIDE_WEBGPU);
   const consoleLines: string[] = [];
   const pageErrors: string[] = [];
@@ -191,7 +201,7 @@ test('plays HLS stream with WebCodecs and renders frames', async ({ page }) => {
     console.log(`e2e: HLS segment fetches observed: ${segmentRequests}`);
 
     renderMode = await readRenderMode(page);
-    expect(['webgl2', 'webgpu'], `renderMode: ${String(renderMode)}`).toContain(renderMode);
+    expect(allowedRenderModes, `renderMode: ${String(renderMode)}`).toContain(renderMode);
   } finally {
     // Artifacts are written on success AND failure so a red run stays
     // diagnosable (console.log + stats.json + a UI screenshot).

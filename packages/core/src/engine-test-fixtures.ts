@@ -2,6 +2,8 @@ import { vi } from 'vitest';
 import type {
   Demuxer,
   DemuxerEvent,
+  EncodedAudioChunkData,
+  EncodedVideoChunkData,
   MediaErrorInfo,
   MediaSource,
   SourcePlugin,
@@ -213,5 +215,104 @@ export function fakeRenderer(): RendererSurface {
     draw: vi.fn(),
     resize: vi.fn(),
     destroy: vi.fn(),
+  };
+}
+
+/**
+ * Demuxer whose events are driven manually by the test, including the audio
+ * branch (audio-config + audio chunks) alongside the video branch.
+ */
+export class ManualAudioDemuxer implements Demuxer {
+  closed = false;
+  private listener: ((event: DemuxerEvent) => void) | null = null;
+
+  push(): void {}
+
+  flush(): void {}
+
+  onEvent(listener: (event: DemuxerEvent) => void): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = null;
+    };
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  emitAudioConfig(config: AudioDecoderConfig): void {
+    this.listener?.({ type: 'audio-config', config });
+  }
+
+  emitAudio(chunk: EncodedAudioChunkData): void {
+    this.listener?.({ type: 'audio', chunk });
+  }
+
+  emitSequenceHeader(config: VideoDecoderConfig): void {
+    this.listener?.({ type: 'sequence-header', config });
+  }
+
+  emitVideo(chunk: EncodedVideoChunkData): void {
+    this.listener?.({ type: 'video', chunk });
+  }
+}
+
+/** Source emitting only the audio branch: metadata + audio-config + one chunk. */
+export class FakeAudioOnlySource implements MediaSource {
+  startCount = 0;
+  stopped = false;
+  private listener: ((event: DemuxerEvent) => void) | null = null;
+
+  start(): void {
+    this.startCount++;
+    this.listener?.({
+      type: 'metadata',
+      metadata: { hasAudio: true, hasVideo: false, codec: 'mp4a.40.2' },
+    });
+    this.listener?.({
+      type: 'audio-config',
+      config: { codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2 },
+    });
+    const ptsUs = Math.round(performance.now() * 1000);
+    this.listener?.({
+      type: 'audio',
+      chunk: { type: 'key', timestamp: ptsUs, data: new Uint8Array([0x21, 0x10]) },
+    });
+  }
+
+  stop(): void {
+    this.stopped = true;
+  }
+
+  onEvent(listener: (event: DemuxerEvent) => void): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = null;
+    };
+  }
+
+  emitError(error: MediaErrorInfo): void {
+    this.listener?.({ type: 'error', error });
+  }
+}
+
+export function makeAudioSourcePlugin(): {
+  plugin: SourcePlugin;
+  get: () => FakeAudioOnlySource | null;
+} {
+  let current: FakeAudioOnlySource | null = null;
+  return {
+    plugin: {
+      type: 'source',
+      id: 'hls',
+      mimeTypes: ['application/vnd.apple.mpegurl'],
+      schemes: ['http', 'https'],
+      create: (): MediaSource => {
+        current = new FakeAudioOnlySource();
+        return current;
+      },
+    },
+    get: () => current,
   };
 }

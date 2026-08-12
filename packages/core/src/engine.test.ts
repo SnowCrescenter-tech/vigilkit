@@ -1,21 +1,33 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createPlayer } from './player.js';
+import { Engine } from './engine.js';
 import { FakeEncodedVideoChunk, FakeVideoDecoder } from './fake-video-decoder.fixture.js';
+import {
+  FakeAudioContext,
+  FakeAudioDecoder,
+  FakeEncodedAudioChunk,
+} from './fake-audio.fixture.js';
 import {
   DataDemuxer,
   FakeDemuxer,
   FakeMediaSource,
   FakeTransport,
+  ManualAudioDemuxer,
   ManualTransport,
   fakeRenderer,
+  makeAudioSourcePlugin,
   makeSoftFactory,
   makeSourcePlugin,
 } from './engine-test-fixtures.js';
-import type { Demuxer, MediaErrorInfo, Plugin, SourceOptions, SourcePlugin, Transport } from '@vigilkit/plugin-sdk';
-import type { RendererSurface } from './types.js';
+import type { Demuxer, DemuxerEvent, MediaErrorInfo, MediaSource, Plugin, SourceOptions, SourcePlugin, Transport } from '@vigilkit/plugin-sdk';
+import type { PlayerOptions, RendererSurface } from './types.js';
 
 /** Transport-path harness: a ManualTransport + a DataDemuxer behind plugins. */
-function makeDemuxerPipeline(transport: Transport, renderer: RendererSurface = fakeRenderer()): {
+function makeDemuxerPipeline(
+  transport: Transport,
+  renderer: RendererSurface = fakeRenderer(),
+  pump?: PlayerOptions['pump'],
+): {
   player: ReturnType<typeof createPlayer>;
   demuxer: () => Demuxer | null;
 } {  const holder: { demuxer: Demuxer | null } = { demuxer: null };
@@ -40,6 +52,7 @@ function makeDemuxerPipeline(transport: Transport, renderer: RendererSurface = f
     demuxer: 'flv',
     plugins: [transportPlugin, demuxerPlugin],
     renderer,
+    pump,
   });
   return { player, demuxer: () => holder.demuxer };
 }
@@ -51,6 +64,39 @@ function mockRenderer() {
     draw: vi.fn(),
     resize: vi.fn(),
     destroy: vi.fn(),
+  };
+}
+
+/** MediaSource emitting a single direct-decoded `frame` event on start(). */
+class FrameSource implements MediaSource {
+  stopped = false;
+  private listener: ((event: DemuxerEvent) => void) | null = null;
+
+  constructor(private readonly frame: VideoFrame) {}
+
+  start(): void {
+    this.listener?.({ type: 'frame', frame: this.frame });
+  }
+
+  stop(): void {
+    this.stopped = true;
+  }
+
+  onEvent(listener: (event: DemuxerEvent) => void): () => void {
+    this.listener = listener;
+    return () => {
+      this.listener = null;
+    };
+  }
+}
+
+function makeFrameSourcePlugin(frame: VideoFrame): SourcePlugin {
+  return {
+    type: 'source',
+    id: 'whep',
+    mimeTypes: ['application/whep'],
+    schemes: [],
+    create: () => new FrameSource(frame),
   };
 }
 
@@ -228,6 +274,33 @@ describe('Engine source plugins', () => {
     player.play();
     vi.advanceTimersByTime(100);
     expect(renderer.draw).toHaveBeenCalled();
+  });
+
+  it('a frame event draws on the renderer and closes when the renderer is null', () => {
+    const drawnFrame = { close: vi.fn() } as unknown as VideoFrame;
+    const renderer = fakeRenderer();
+    const player = createPlayer({
+      url: 'https://example.invalid/whep',
+      demuxer: 'whep',
+      plugins: [makeFrameSourcePlugin(drawnFrame)],
+      renderer,
+    });
+    player.play();
+    // The renderer owns the frame: drawn, not closed by the engine.
+    expect(renderer.draw).toHaveBeenCalledWith(drawnFrame);
+    expect(drawnFrame.close).not.toHaveBeenCalled();
+    expect(player.getStats().framesDecoded).toBe(1);
+
+    const closedFrame = { close: vi.fn() } as unknown as VideoFrame;
+    const player2 = createPlayer({
+      url: 'https://example.invalid/whep',
+      demuxer: 'whep',
+      plugins: [makeFrameSourcePlugin(closedFrame)],
+      renderer: null,
+    });
+    player2.play();
+    expect(closedFrame.close).toHaveBeenCalledOnce();
+    expect(player2.getStats().framesDecoded).toBe(1);
   });
 });
 
@@ -482,5 +555,252 @@ describe('Engine transport pipeline', () => {
     vi.advanceTimersByTime(10_000);
     expect(errors).toHaveLength(0);
     expect(player.getStats().state).toBe('stopped');
+  });
+});
+
+describe('Engine pump', () => {
+  beforeEach(() => {
+    FakeVideoDecoder.resetInstances();
+    vi.useFakeTimers();
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder);
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('ticks via an injected one-shot rAF driver (one request per tick)', () => {
+    const src = makeSourcePlugin();
+    const renderer = fakeRenderer();
+    const pending = new Map<number, () => void>();
+    let nextId = 1;
+    const fireNext = (): void => {
+      const entry = pending.entries().next();
+      if (entry.done) {
+        return;
+      }
+      const [id, cb] = entry.value;
+      pending.delete(id);
+      cb();
+    };
+    const player = createPlayer({
+      url: 'hls://host/stream.m3u8',
+      demuxer: 'hls',
+      plugins: [src.plugin],
+      renderer,
+      pump: {
+        requestFrame: (cb) => {
+          const id = nextId++;
+          pending.set(id, cb);
+          return id;
+        },
+        cancelFrame: (id) => pending.delete(id),
+      },
+    });
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    expect(pending.size).toBe(1); // the pump requested its first frame
+    fireNext();
+    expect(pending.size).toBe(1); // re-armed after the tick
+    expect(frames).toHaveLength(1);
+    expect(renderer.draw).toHaveBeenCalled();
+    player.destroy();
+    expect(pending.size).toBe(0); // stop canceled the pending request
+  });
+
+  it('interval-style pump drivers keep the pipeline draining under fake timers', () => {
+    const transport = new ManualTransport();
+    const renderer = fakeRenderer();
+    const { player } = makeDemuxerPipeline(transport, renderer, {
+      requestFrame: (cb) => setTimeout(cb, 30),
+      cancelFrame: (id) => clearTimeout(id),
+    });
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    transport.emitOpen();
+    transport.emitData(new Uint8Array([1]));
+    vi.advanceTimersByTime(29);
+    expect(frames).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(frames).toHaveLength(1);
+    transport.emitData(new Uint8Array([2]));
+    vi.advanceTimersByTime(30);
+    expect(frames).toHaveLength(2);
+  });
+});
+
+describe('Engine audio pipeline', () => {
+  beforeEach(() => {
+    FakeVideoDecoder.resetInstances();
+    FakeAudioDecoder.resetInstances();
+    FakeAudioContext.resetInstances();
+    vi.useFakeTimers();
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder);
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk);
+    vi.stubGlobal('EncodedAudioChunk', FakeEncodedAudioChunk);
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const AUDIO_CONFIG: AudioDecoderConfig = {
+    codec: 'mp4a.40.2',
+    sampleRate: 48000,
+    numberOfChannels: 2,
+  };
+
+  /** Transport-path harness with an injectable fake AudioDecoder factory. */
+  function makeAudioEngine(
+    transport: Transport,
+    opts: { audio?: boolean; now?: () => number } = {},
+  ): { engine: Engine; demuxer: () => ManualAudioDemuxer | null } {
+    const holder: { demuxer: ManualAudioDemuxer | null } = { demuxer: null };
+    const transportPlugin: Plugin = {
+      type: 'transport',
+      id: 'fake-ws',
+      schemes: ['ws', 'wss'],
+      create: () => transport,
+    };
+    const demuxerPlugin: Plugin = {
+      type: 'demuxer',
+      id: 'fake-flv',
+      mimeTypes: ['video/x-flv'],
+      schemes: ['flv'],
+      create: () => {
+        holder.demuxer = new ManualAudioDemuxer();
+        return holder.demuxer;
+      },
+    };
+    const engine = new Engine(
+      {
+        url: 'ws://host/stream',
+        demuxer: 'flv',
+        plugins: [transportPlugin, demuxerPlugin],
+        renderer: fakeRenderer(),
+        audio: opts.audio,
+        now: opts.now,
+      },
+      undefined,
+      (handlers) => new FakeAudioDecoder(handlers) as unknown as AudioDecoder,
+    );
+    return { engine, demuxer: () => holder.demuxer };
+  }
+
+  it('audio-config + audio chunks drive the AudioDecoder and AudioOutput', () => {
+    const transport = new ManualTransport();
+    const { engine, demuxer } = makeAudioEngine(transport);
+    const errors: MediaErrorInfo[] = [];
+    engine.on('error', (e) => errors.push(e));
+    engine.play();
+    transport.emitOpen();
+    demuxer()!.emitAudioConfig(AUDIO_CONFIG);
+    demuxer()!.emitAudio({ type: 'key', timestamp: 1_000_000, data: new Uint8Array([0x21, 0x10]) });
+    demuxer()!.emitAudio({ type: 'delta', timestamp: 2_000_000, data: new Uint8Array([0x22, 0x10]) });
+    expect(FakeAudioDecoder.instances).toHaveLength(1);
+    expect(FakeAudioDecoder.instances[0]!.configureCalls).toEqual([AUDIO_CONFIG]);
+    expect(FakeAudioDecoder.instances[0]!.decodeCalls).toHaveLength(2);
+    expect(FakeAudioContext.instances).toHaveLength(1);
+    const ctx = FakeAudioContext.instances[0]!;
+    expect(ctx.buffers).toHaveLength(2);
+    expect(ctx.sources).toHaveLength(2);
+    expect(engine.getStats().audioFramesDecoded).toBe(2);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('audio:false ignores audio events entirely', () => {
+    const transport = new ManualTransport();
+    const { engine, demuxer } = makeAudioEngine(transport, { audio: false });
+    const errors: MediaErrorInfo[] = [];
+    engine.on('error', (e) => errors.push(e));
+    engine.play();
+    transport.emitOpen();
+    demuxer()!.emitAudioConfig(AUDIO_CONFIG);
+    demuxer()!.emitAudio({ type: 'key', timestamp: 1_000_000, data: new Uint8Array([1]) });
+    expect(FakeAudioDecoder.instances).toHaveLength(0);
+    expect(FakeAudioContext.instances).toHaveLength(0);
+    expect(engine.getStats().audioFramesDecoded).toBe(0);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('first audio activation re-bases the video clock (resync)', () => {
+    const transport = new ManualTransport();
+    let wallMs = 0;
+    const { engine, demuxer } = makeAudioEngine(transport, { now: () => wallMs });
+    engine.play();
+    transport.emitOpen();
+    // A video chunk establishes a wall-clock base first.
+    demuxer()!.emitSequenceHeader({ codec: 'vp8', codedWidth: 640, codedHeight: 480 });
+    demuxer()!.emitVideo({ type: 'key', timestamp: 1_000_000, data: new Uint8Array([1]) });
+    vi.advanceTimersByTime(30);
+    expect(engine.getStats().framesDecoded).toBe(1);
+    // Audio activates: decode + schedule flips the master to audio media time.
+    demuxer()!.emitAudioConfig(AUDIO_CONFIG);
+    demuxer()!.emitAudio({ type: 'key', timestamp: 5_000_000, data: new Uint8Array([1]) });
+    expect(engine.getStats().audioFramesDecoded).toBe(1);
+    const ctx = FakeAudioContext.instances[0]!;
+    // Advance the audio master clock; the wall clock jumps far ahead too.
+    ctx.currentTime = 10;
+    wallMs = 1_000_000;
+    // Master time is now 5_000_000 + (10 - 0.25) * 1e6 = 14_750_000 碌s.
+    demuxer()!.emitVideo({ type: 'delta', timestamp: 14_750_000, data: new Uint8Array([2]) });
+    vi.advanceTimersByTime(30);
+    // Without the resync this chunk would be hopelessly late vs the 0-based
+    // clock and dropped.
+    expect(engine.getStats().framesDropped).toBe(0);
+    expect(engine.getStats().framesDecoded).toBe(2);
+  });
+
+  it('audio decoder error surfaces as a DECODE error event', () => {
+    const transport = new ManualTransport();
+    const { engine, demuxer } = makeAudioEngine(transport);
+    const errors: MediaErrorInfo[] = [];
+    engine.on('error', (e) => errors.push(e));
+    engine.play();
+    transport.emitOpen();
+    demuxer()!.emitAudioConfig(AUDIO_CONFIG);
+    FakeAudioDecoder.instances[0]!.triggerError(new Error('aac exploded'));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('DECODE');
+    expect(errors[0]?.message).toBe('aac exploded');
+    expect(engine.getStats().state).toBe('error');
+  });
+
+  it('audio-only stream reaches playing and counts audio frames', () => {
+    const src = makeAudioSourcePlugin();
+    const engine = new Engine(
+      {
+        url: 'hls://host/stream.m3u8',
+        demuxer: 'hls',
+        plugins: [src.plugin],
+        renderer: fakeRenderer(),
+      },
+      undefined,
+      (handlers) => new FakeAudioDecoder(handlers) as unknown as AudioDecoder,
+    );
+    engine.play();
+    expect(engine.getStats().state).toBe('playing');
+    expect(FakeAudioDecoder.instances).toHaveLength(1);
+    expect(engine.getStats().audioFramesDecoded).toBeGreaterThan(0);
+  });
+
+  it('destroy() closes the audio pipeline', () => {
+    const transport = new ManualTransport();
+    const { engine, demuxer } = makeAudioEngine(transport);
+    engine.play();
+    transport.emitOpen();
+    demuxer()!.emitAudioConfig(AUDIO_CONFIG);
+    demuxer()!.emitAudio({ type: 'key', timestamp: 1_000_000, data: new Uint8Array([1]) });
+    const fake = FakeAudioDecoder.instances[0]!;
+    const ctx = FakeAudioContext.instances[0]!;
+    engine.destroy();
+    expect(fake.closed).toBe(true);
+    expect(ctx.closeCount).toBe(1);
   });
 });

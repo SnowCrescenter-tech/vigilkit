@@ -9,48 +9,64 @@ import type {
 import { buildDecoder } from './decoder-chain.js';
 import { nativeDecoderFactory } from './decoder.js';
 import type { VideoCodecDecoder, VideoDecoderFactory } from './decoder.js';
+import { nativeAudioDecoderFactory, type AudioDecoderFactory } from './audio-decoder.js';
+import { AudioPipeline } from './audio-pipeline.js';
+import { MasterClock } from './master-clock.js';
 import { Scheduler } from './scheduler.js';
 import { SourceBranch } from './source-branch.js';
 import { TransportPipeline } from './transport-pipeline.js';
 import { Emitter } from './events.js';
 import { mediaError } from './errors.js';
 import { asMediaError, schemeOf } from './plugin-utils.js';
+import { Pump } from './pump.js';
 import type { Player, PlayerEvents, PlayerOptions, PlayerState, PlayerStats } from './types.js';
 
-const PUMP_INTERVAL_MS = 30;
-
 /**
- * Internal orchestrator: resolves plugins, then drives either the
- * transport → demuxer pipeline or a source plugin pipeline, and owns the
- * scheduler pump. v0.1/v0.2 use a setInterval pump; rAF is a later step.
+ * Orchestrator: resolves plugins, drives either the transport → demuxer
+ * pipeline or a source plugin pipeline, and owns the scheduler pump
+ * (rAF in browsers, interval fallback elsewhere).
  */
 export class Engine implements Player {
-  private readonly options: PlayerOptions;
   private readonly registry = new PluginRegistry();
   private readonly emitter = new Emitter<PlayerEvents>();
   private readonly decoder: VideoCodecDecoder;
   private readonly scheduler: Scheduler;
+  private readonly pump: Pump;
+  private readonly masterClock: MasterClock;
   private readonly errors: MediaErrorInfo[] = [];
   private readonly pipeline: TransportPipeline;
   private readonly sourceBranch = new SourceBranch();
-  private pumpId: ReturnType<typeof setInterval> | null = null;
+  private readonly audioPipeline: AudioPipeline;
   private state: PlayerState = 'idle';
   private destroyed = false;
   private pluginsRegistered = false;
   private metadata: StreamMetadata | null = null;
+  /** Direct-decoded frames (e.g. WHEP) counted like scheduler-decoded frames. */
+  private directFrames = 0;
 
-  constructor(options: PlayerOptions, decoderFactory?: VideoDecoderFactory) {
-    this.options = options;
+  constructor(private readonly options: PlayerOptions, decoderFactory?: VideoDecoderFactory, audioDecoderFactory?: AudioDecoderFactory) {
+    this.masterClock = new MasterClock({ now: options.now });
     this.decoder = buildDecoder({
       createWebCodecs: decoderFactory ?? nativeDecoderFactory,
       softFactory: options.softDecoder?.factory,
       forceSoft: options.forceSoft,
     });
+    this.audioPipeline = new AudioPipeline({
+      enabled: options.audio !== false,
+      decoderFactory: audioDecoderFactory ?? nativeAudioDecoderFactory,
+      onFirstAudio: (output) => {
+        this.masterClock.attachAudio(output);
+        this.scheduler.resync();
+      },
+      onError: (info) => this.handleError(info),
+    });
     this.decoder.onError((info) => this.handleError(info));
     this.scheduler = new Scheduler(this.decoder, options.renderer, {
+      now: () => this.masterClock.nowMs(),
       onFrame: (frame, ptsUs) => this.emitter.emit('frame', { frame, ptsUs }),
       onError: (info) => this.handleError(info),
     });
+    this.pump = new Pump(() => this.scheduler.tick(), { drivers: options.pump });
     this.pipeline = new TransportPipeline({
       demuxerEvent: (event) => this.handleDemuxerEvent(event),
       onOpen: () => {
@@ -81,8 +97,7 @@ export class Engine implements Player {
     if (this.state !== 'playing' && this.state !== 'connecting') {
       return;
     }
-    // Minimal v0.2 behavior: pause stops the pump and state only. The source
-    // keeps fetching/buffering (e.g. HLS) and resume is not yet in scope.
+    // v0.2: pause stops the pump and state only; the source keeps buffering.
     this.stopPump();
     this.setState('paused');
   }
@@ -93,9 +108,11 @@ export class Engine implements Player {
     }
     this.destroyed = true;
     this.stopPump();
+    this.pump.destroy();
     this.pipeline.teardown();
     this.sourceBranch.disconnect();
     this.decoder.close();
+    this.audioPipeline.destroy();
     this.options.renderer?.destroy();
     this.state = 'stopped';
   }
@@ -108,9 +125,10 @@ export class Engine implements Player {
     const s = this.scheduler.getStats();
     return {
       state: this.state,
-      framesDecoded: s.framesDecoded,
+      framesDecoded: s.framesDecoded + this.directFrames,
       framesDropped: s.framesDropped,
       fps: s.fps,
+      audioFramesDecoded: this.audioPipeline.decodedFrameCount,
       errors: [...this.errors],
     };
   }
@@ -184,11 +202,7 @@ export class Engine implements Player {
   }
 
   private resolveSourcePlugin(scheme: string): SourcePlugin | undefined {
-    const byDemuxer = this.registry.getSource(this.options.demuxer);
-    if (byDemuxer !== undefined) {
-      return byDemuxer;
-    }
-    return this.registry.getSource(scheme);
+    return this.registry.getSource(this.options.demuxer) ?? this.registry.getSource(scheme);
   }
 
   /** A transport 'close': connect failure while connecting, clean stop otherwise. */
@@ -215,8 +229,24 @@ export class Engine implements Player {
       case 'video':
         this.scheduler.enqueue(event.chunk);
         break;
+      case 'audio-config':
       case 'audio':
-        // v0.1 is video-only.
+        this.audioPipeline.handle(event);
+        break;
+      case 'frame':
+        this.directFrames++;
+        if (this.options.renderer !== null) {
+          try {
+            this.options.renderer.draw(event.frame);
+          } catch (error) {
+            // Mirror the scheduler's decoder-output path: a throwing renderer
+            // must surface as a RENDERER error, never escape the source loop.
+            const message = error instanceof Error ? error.message : 'renderer draw failed';
+            this.handleError(mediaError('RENDERER', message));
+          }
+        } else {
+          event.frame.close();
+        }
         break;
       case 'error':
         this.handleError(event.error);
@@ -242,19 +272,11 @@ export class Engine implements Player {
   }
 
   private startPump(): void {
-    if (this.pumpId !== null) {
-      return;
-    }
-    this.pumpId = setInterval(() => {
-      this.scheduler.tick();
-      this.emitter.emit('stats', this.getStats());
-    }, PUMP_INTERVAL_MS);
+    this.pump.start();
+    this.options.renderer?.resize();
   }
 
   private stopPump(): void {
-    if (this.pumpId !== null) {
-      clearInterval(this.pumpId);
-      this.pumpId = null;
-    }
+    this.pump.stop();
   }
 }
