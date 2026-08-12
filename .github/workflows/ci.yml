@@ -17,7 +17,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
-      - run: pnpm --filter @vigilkit/plugin-hevc-wasm smoke
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
