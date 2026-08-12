@@ -28,6 +28,50 @@ const MIME_TYPES = {
   '.png': 'image/png',
 };
 
+// Demo asset aliases, resolved before the dist fallback. Each route is rooted
+// in its own directory with a dedicated MIME map (the wasm MIME is critical
+// for instantiation).
+const ALIAS_ROUTES = [
+  {
+    prefix: '/hls/',
+    root: resolve(PACKAGE_DIR, 'hls-fixtures'),
+    mimes: {
+      '.m3u8': 'application/vnd.apple.mpegurl',
+      '.ts': 'video/mp2t',
+    },
+  },
+  {
+    prefix: '/hevc/',
+    root: resolve(PACKAGE_DIR, 'hevc-fixtures'),
+    mimes: {
+      '.hevc': 'video/hevc',
+    },
+  },
+  {
+    prefix: '/vendor/',
+    root: resolve(PACKAGE_DIR, 'vendor'),
+    mimes: {
+      '.js': 'text/javascript; charset=utf-8',
+      '.wasm': 'application/wasm',
+    },
+  },
+];
+
+function resolveAlias(pathname) {
+  for (const route of ALIAS_ROUTES) {
+    if (!pathname.startsWith(route.prefix)) {
+      continue;
+    }
+    const relative = pathname.slice(route.prefix.length);
+    const filePath = resolve(route.root, relative);
+    if (filePath !== route.root && !filePath.startsWith(route.root + sep)) {
+      return null; // path traversal
+    }
+    return { filePath, mimes: route.mimes };
+  }
+  return null;
+}
+
 function parseArgs(argv) {
   const args = { port: 8080, loop: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -95,7 +139,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  const filePath = resolveStatic(url.pathname);
+  const alias = resolveAlias(url.pathname);
+  const filePath = alias !== null ? alias.filePath : resolveStatic(url.pathname);
   let data = null;
   if (filePath !== null) {
     try {
@@ -110,7 +155,8 @@ const server = createServer((req, res) => {
     return;
   }
 
-  const mime = MIME_TYPES[extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+  const mimes = alias !== null ? alias.mimes : MIME_TYPES;
+  const mime = mimes[extname(filePath).toLowerCase()] ?? 'application/octet-stream';
   res.writeHead(200, { 'Content-Type': mime, 'Content-Length': data.length });
   res.end(data);
 });
@@ -170,4 +216,5 @@ server.listen(args.port, () => {
   console.log(
     `[vigilkit] ws stream: ws://localhost:${args.port}/live${args.loop ? ' (loop)' : ''}`
   );
+  console.log('[vigilkit] routes: /hls/* -> hls-fixtures/ (m3u8, ts), /hevc/* -> hevc-fixtures/ (hevc), /vendor/* -> vendor/ (js, wasm)');
 });

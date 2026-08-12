@@ -7,6 +7,7 @@ export interface MediaErrorInfo { code: MediaErrorCode; message: string; }
 export interface StreamMetadata {
   width?: number; height?: number; framerate?: number; duration?: number;
   hasAudio: boolean; hasVideo: boolean; codec?: string;
+  sampleRate?: number; channels?: number;
 }
 
 export interface EncodedVideoChunkData {
@@ -59,4 +60,22 @@ export interface TransportPlugin {
   create(url: string): Transport;
 }
 
-export type Plugin = DemuxerPlugin | TransportPlugin;
+export interface MediaSource {
+  start(): void;             // begin fetching/parsing (called by engine on play)
+  stop(): void;              // stop fetching; idempotent; no events after stop
+  onEvent(listener: (event: DemuxerEvent) => void): () => void;  // same event union as Demuxer
+}
+
+export interface SourcePlugin {
+  type: 'source';
+  id: string;
+  mimeTypes: readonly string[];   // e.g. ['application/vnd.apple.mpegurl', 'application/x-mpegURL']
+  schemes: readonly string[];     // e.g. ['http', 'https']
+  create(url: string, options?: SourceOptions): MediaSource;
+}
+
+export interface SourceOptions {
+  variant?: 'lowest' | 'highest' | number;  // HLS variant selection; default 'lowest'
+}
+
+export type Plugin = DemuxerPlugin | TransportPlugin | SourcePlugin;

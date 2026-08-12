@@ -1,0 +1,30 @@
+vigilkit plugin-hevc-wasm
+
+This product includes software developed by vigilkit contributors
+(https://github.com/vigilkit/vigilkit). The glue code in this package is
+licensed under the Apache License 2.0; see LICENSE.
+
+LGPL-3.0 subcomponent: libde265 (HEVC decoder)
+
+This package is an adapter for the WebAssembly build of libde265, an open
+H.265/HEVC decoder, distributed via the npm package @yume-chan/libde265
+(https://github.com/yume-chan/libde265) and vendored for this project in
+examples/basic/vendor/libde265-esm.js + libde265.wasm (sha256-pinned).
+
+The libde265 binary artifact is licensed under the GNU Lesser General
+Public License, version 3.0 (LGPL-3.0). Its source code is available at
+https://github.com/strukturag/libde265 and from the npm package tarball.
+
+Source offer: on request, the complete corresponding source code of the
+vendored libde265 artifact is provided. Written offer: vigilkit project
+maintainers (see https://github.com/vigilkit/vigilkit).
+
+Re-linkability: the libde265 WASM artifact is a physically isolated module
+loaded at runtime by the loadLibde265() loader; it is not linked into this
+package's JavaScript. Any build of libde265 exposing the same ESM API
+(default async factory returning a Module with a `Decoder` class) can be
+substituted by replacing the vendored artifact, and the package's
+decode/encode logic does not depend on any specific libde265 version.
+
+The Apache-2.0 license applies only to the glue code written by vigilkit;
+it does not apply to the libde265 artifact itself.

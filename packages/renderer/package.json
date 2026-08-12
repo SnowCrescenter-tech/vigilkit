@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@webgpu/types": "^0.1.65",
     "vigilkit": "workspace:*"
   },
   "dependencies": {}

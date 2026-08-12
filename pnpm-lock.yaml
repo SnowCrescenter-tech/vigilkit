@@ -38,6 +38,12 @@ importers:
       '@vigilkit/plugin-flv':
         specifier: workspace:*
         version: link:../../packages/plugins/flv
+      '@vigilkit/plugin-hevc-wasm':
+        specifier: workspace:*
+        version: link:../../packages/plugins/hevc-wasm
+      '@vigilkit/plugin-hls':
+        specifier: workspace:*
+        version: link:../../packages/plugins/hls
       '@vigilkit/plugin-ws':
         specifier: workspace:*
         version: link:../../packages/plugins/ws
@@ -64,10 +70,41 @@ importers:
         specifier: workspace:*
         version: link:../plugin-sdk
 
+  packages/media-utils: {}
+
   packages/plugin-sdk: {}
 
   packages/plugins/flv:
     dependencies:
+      '@vigilkit/media-utils':
+        specifier: workspace:*
+        version: link:../../media-utils
+      '@vigilkit/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+
+  packages/plugins/hevc-wasm:
+    dependencies:
+      '@vigilkit/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      vigilkit:
+        specifier: workspace:*
+        version: link:../../core
+
+  packages/plugins/hls:
+    dependencies:
+      '@vigilkit/media-utils':
+        specifier: workspace:*
+        version: link:../../media-utils
       '@vigilkit/plugin-sdk':
         specifier: workspace:*
         version: link:../../plugin-sdk
@@ -84,6 +121,9 @@ importers:
 
   packages/renderer:
     devDependencies:
+      '@webgpu/types':
+        specifier: ^0.1.65
+        version: 0.1.71
       vigilkit:
         specifier: workspace:*
         version: link:../core
@@ -925,6 +965,9 @@ packages:
 
   '@vitest/utils@4.1.10':
     resolution: {integrity: sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA==}
+
+  '@webgpu/types@0.1.71':
+    resolution: {integrity: sha512-mMy8/ODcKhab808co15eW+yN+HgXoQxRQHTiBV9Mrvl1r0ufnid7YOcI+gi4eUWSWl9ezD6TW2KXccrL8HCh2A==}
 
   abbrev@2.0.0:
     resolution: {integrity: sha512-6/mh1E2u2YgEsCHdY0Yx5oW+61gZU+1vXaoiHHrpKeuRNNgFvS+/jrwHiQhB5apAf5oB7UB7E19ol2R2LKH8hQ==}
@@ -2748,6 +2791,8 @@ snapshots:
       '@vitest/pretty-format': 4.1.10
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
+
+  '@webgpu/types@0.1.71': {}
 
   abbrev@2.0.0: {}
 

@@ -1,10 +1,10 @@
-import { demuxError } from './errors.js';
+import { formatError } from './errors.js';
 
 /**
  * Sequential big-endian reader over a `Uint8Array`.
  * Every read advances the internal position. Reading or skipping past the end
- * of the buffer throws a `DemuxError` with code 'DEMUX' rather than returning
- * a partial value — the caller uses `remaining`/`eof()` to avoid surprises.
+ * of the buffer throws a `MediaFormatError` rather than returning a partial
+ * value — callers use `remaining`/`eof()` to avoid surprises.
  */
 export class ByteReader {
   private readonly data: Uint8Array;
@@ -65,32 +65,18 @@ export class ByteReader {
     return value;
   }
 
-  /** Reads a big-endian IEEE-754 double (AMF0 number). */
-  readF64(): number {
-    this.require(8);
-    const view = new DataView(new ArrayBuffer(8));
-    for (let i = 0; i < 8; i++) {
-      view.setUint8(i, this.data[this.pos + i] as number);
-    }
-    this.pos += 8;
-    return view.getFloat64(0, false);
-  }
-
-  /** Returns `length` raw bytes as a view into the underlying buffer and advances. */
+  /**
+   * Returns `length` raw bytes as a fresh copy and advances the position.
+   * Callers own the returned buffer.
+   */
   readBytes(length: number): Uint8Array {
     this.require(length);
-    const bytes = this.data.subarray(this.pos, this.pos + length);
+    const bytes = this.data.slice(this.pos, this.pos + length);
     this.pos += length;
     return bytes;
   }
 
-  /** Returns the byte at `offset` ahead of the current position without advancing. */
-  peekU8(offset = 0): number {
-    this.require(offset + 1);
-    return this.data[this.pos + offset] as number;
-  }
-
-  /** Advances `length` bytes. */
+  /** Advances `length` bytes without reading them. */
   skip(length: number): void {
     this.require(length);
     this.pos += length;
@@ -98,8 +84,7 @@ export class ByteReader {
 
   private require(length: number): void {
     if (this.pos + length > this.data.length) {
-      throw demuxError(
-        'DEMUX',
+      throw formatError(
         `out of bounds: need ${length} bytes at ${this.pos}, have ${this.data.length}`,
       );
     }

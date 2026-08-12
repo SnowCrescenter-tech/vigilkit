@@ -1,31 +1,42 @@
 import { PluginCollisionError } from './errors.js';
-import type { DemuxerPlugin, Plugin, TransportPlugin } from './types.js';
+import type { DemuxerPlugin, Plugin, SourcePlugin, TransportPlugin } from './types.js';
 
 const norm = (value: string): string => value.toLowerCase();
+
+const claimsMime = (plugin: Plugin): plugin is DemuxerPlugin | SourcePlugin =>
+  plugin.type === 'demuxer' || plugin.type === 'source';
 
 export class PluginRegistry {
   private readonly byId = new Map<string, Plugin>();
   private readonly schemeOwners = new Map<string, Plugin>();
-  private readonly mimeOwners = new Map<string, DemuxerPlugin>();
+  private readonly mimeOwners = new Map<string, DemuxerPlugin | SourcePlugin>();
 
   register(plugin: Plugin): void {
     const id = plugin.id;
-    if (this.byId.has(id)) {
-      throw new PluginCollisionError(`plugin id "${id}" is already registered`);
+    const existing = this.byId.get(id);
+    if (existing !== undefined) {
+      throw new PluginCollisionError(
+        `plugin id "${id}" is already registered as a ${existing.type}`,
+      );
     }
     for (const scheme of plugin.schemes) {
       const key = norm(scheme);
       const owner = this.schemeOwners.get(key);
       if (owner !== undefined) {
-        throw new PluginCollisionError(`scheme "${scheme}" is already claimed by plugin "${owner.id}"`);
+        throw new PluginCollisionError(
+          `scheme "${scheme}" is already claimed by ${owner.type} plugin "${owner.id}"`,
+        );
       }
     }
-    if (plugin.type === 'demuxer') {
+    if (claimsMime(plugin)) {
       for (const mime of plugin.mimeTypes) {
         const key = norm(mime);
         const owner = this.mimeOwners.get(key);
         if (owner !== undefined) {
-          throw new PluginCollisionError(`mimeType "${mime}" is already claimed by plugin "${owner.id}"`);
+          throw new PluginCollisionError(
+            `mimeType "${mime}" is already claimed by ${owner.type} plugin "${owner.id}"; ` +
+              `cannot register ${plugin.type} plugin "${plugin.id}"`,
+          );
         }
       }
     }
@@ -33,7 +44,7 @@ export class PluginRegistry {
     for (const scheme of plugin.schemes) {
       this.schemeOwners.set(norm(scheme), plugin);
     }
-    if (plugin.type === 'demuxer') {
+    if (claimsMime(plugin)) {
       for (const mime of plugin.mimeTypes) {
         this.mimeOwners.set(norm(mime), plugin);
       }
@@ -49,7 +60,7 @@ export class PluginRegistry {
     for (const scheme of plugin.schemes) {
       this.schemeOwners.delete(norm(scheme));
     }
-    if (plugin.type === 'demuxer') {
+    if (claimsMime(plugin)) {
       for (const mime of plugin.mimeTypes) {
         this.mimeOwners.delete(norm(mime));
       }
@@ -68,7 +79,19 @@ export class PluginRegistry {
     if (byScheme?.type === 'demuxer') {
       return byScheme;
     }
-    return this.mimeOwners.get(key);
+    const byMime = this.mimeOwners.get(key);
+    return byMime?.type === 'demuxer' ? byMime : undefined;
+  }
+
+  getSource(idOrMime: string): SourcePlugin | undefined {
+    const key = norm(idOrMime);
+    for (const plugin of this.byId.values()) {
+      if (plugin.type === 'source' && norm(plugin.id) === key) {
+        return plugin;
+      }
+    }
+    const byMime = this.mimeOwners.get(key);
+    return byMime?.type === 'source' ? byMime : undefined;
   }
 
   list(): readonly Plugin[] {

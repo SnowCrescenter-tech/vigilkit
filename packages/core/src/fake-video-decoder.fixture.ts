@@ -1,3 +1,5 @@
+import type { EncodedVideoChunkData, MediaErrorInfo } from '@vigilkit/plugin-sdk';
+
 export class FakeVideoFrame {
   readonly timestamp: number;
   closeCount = 0;
@@ -32,6 +34,7 @@ export class FakeEncodedVideoChunk {
  */
 export class FakeVideoDecoder {
   static readonly instances: FakeVideoDecoder[] = [];
+  static isConfigSupported: ((config: VideoDecoderConfig) => Promise<VideoDecoderSupport>) | undefined;
 
   readonly configureCalls: VideoDecoderConfig[] = [];
   readonly decodeCalls: EncodedVideoChunk[] = [];
@@ -101,5 +104,70 @@ export class FakeVideoDecoder {
 
   static resetInstances(): void {
     FakeVideoDecoder.instances.length = 0;
+  }
+}
+
+/**
+ * Soft (non-WebCodecs) decoder stand-in implementing `VideoCodecDecoder`.
+ * Emits one fake frame per decoded chunk with the chunk's PTS, so the routing
+ * layer and the pipeline can be exercised without a real soft codec.
+ */
+export class FakeSoftDecoder {
+  static readonly instances: FakeSoftDecoder[] = [];
+
+  readonly configureCalls: VideoDecoderConfig[] = [];
+  readonly decodeCalls: EncodedVideoChunkData[] = [];
+  readonly outputFrames: FakeVideoFrame[] = [];
+  flushCount = 0;
+  resetCount = 0;
+  closeCount = 0;
+  closed = false;
+  queueSize = 0;
+  private outputCb: ((frame: VideoFrame, ptsUs: number) => void) | null = null;
+  private errorCb: ((info: MediaErrorInfo) => void) | null = null;
+
+  constructor() {
+    FakeSoftDecoder.instances.push(this);
+  }
+
+  configure(config: VideoDecoderConfig): void {
+    this.configureCalls.push(config);
+  }
+
+  decode(chunk: EncodedVideoChunkData): void {
+    this.decodeCalls.push(chunk);
+    const fakeFrame = new FakeVideoFrame(chunk.timestamp);
+    this.outputFrames.push(fakeFrame);
+    this.outputCb?.(fakeFrame as unknown as VideoFrame, chunk.timestamp);
+  }
+
+  flush(): Promise<void> {
+    this.flushCount++;
+    return Promise.resolve();
+  }
+
+  reset(): void {
+    this.resetCount++;
+  }
+
+  close(): void {
+    this.closeCount++;
+    this.closed = true;
+  }
+
+  onOutput(cb: (frame: VideoFrame, ptsUs: number) => void): void {
+    this.outputCb = cb;
+  }
+
+  onError(cb: (info: MediaErrorInfo) => void): void {
+    this.errorCb = cb;
+  }
+
+  triggerError(info: MediaErrorInfo): void {
+    this.errorCb?.(info);
+  }
+
+  static resetInstances(): void {
+    FakeSoftDecoder.instances.length = 0;
   }
 }

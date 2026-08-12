@@ -4,6 +4,7 @@ export * from './types.js';
 export * from './jitter-buffer.js';
 export * from './av-sync.js';
 export * from './decoder.js';
+export * from './decoder-chain.js';
 export * from './scheduler.js';
 export * from './engine.js';
 export * from './player.js';

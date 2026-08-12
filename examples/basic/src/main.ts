@@ -1,12 +1,17 @@
 import { createPlayer } from 'vigilkit';
-import type { Player, PlayerEvents, PlayerState, PlayerStats } from 'vigilkit';
+import type { Player, PlayerState, PlayerStats, RendererSurface } from 'vigilkit';
 import { flvDemuxerPlugin } from '@vigilkit/plugin-flv';
 import { wsTransportPlugin } from '@vigilkit/plugin-ws';
-import { createRenderer } from '@vigilkit/renderer';
+import { hlsSourcePlugin } from '@vigilkit/plugin-hls';
+import { createRenderer, createRendererAsync } from '@vigilkit/renderer';
+import { createHevcDemo } from './hevc-demo';
+import type { ErrorInfo, HevcDemo } from './hevc-demo';
 
-type ErrorInfo = PlayerEvents['error'];
+/** Demo mode, selected via `?source=flv|hls|hevc` on the page URL (default flv). */
+type DemoMode = 'flv' | 'hls' | 'hevc';
 
 const WS_URL = `ws://${location.host}/live`;
+const HLS_URL = `http://${location.host}/hls/master.m3u8`;
 
 const STATE_LABELS: Record<PlayerState, string> = {
   idle: 'idle / 未连接',
@@ -32,10 +37,21 @@ const framesEl = requiredElement('frames', HTMLSpanElement);
 const errorsEl = requiredElement('errors', HTMLDivElement);
 const connectBtn = requiredElement('connect', HTMLButtonElement);
 const disconnectBtn = requiredElement('disconnect', HTMLButtonElement);
+const modeEl = requiredElement('mode', HTMLSpanElement);
 
-const renderer = createRenderer(canvas);
+const mode: DemoMode = resolveMode();
 
+let renderer: RendererSurface;
 let player: Player | null = null;
+let demoActive = false;
+
+function resolveMode(): DemoMode {
+  const source = new URLSearchParams(window.location.search).get('source');
+  if (source === 'hls' || source === 'hevc') {
+    return source;
+  }
+  return 'flv';
+}
 
 function renderStats(stats: PlayerStats): void {
   statusEl.textContent = STATE_LABELS[stats.state];
@@ -53,9 +69,11 @@ function renderError(error: ErrorInfo): void {
 }
 
 function syncButtons(state: PlayerState): void {
-  connectBtn.disabled = state === 'connecting' || state === 'playing';
-  disconnectBtn.disabled = player === null;
+  connectBtn.disabled = state === 'connecting' || state === 'playing' || demoActive;
+  disconnectBtn.disabled = !demoActive;
 }
+
+// ---- engine-based modes (flv / hls) -----------------------------------------
 
 function buildPlayer(): Player {
   const instance = createPlayer({
@@ -69,35 +87,91 @@ function buildPlayer(): Player {
   return instance;
 }
 
+function buildHlsPlayer(): Player {
+  const instance = createPlayer({
+    url: HLS_URL,
+    demuxer: 'hls',
+    plugins: [hlsSourcePlugin()],
+    renderer,
+  });
+  instance.on('stats', renderStats);
+  instance.on('error', renderError);
+  return instance;
+}
+
+// ---- controls ----------------------------------------------------------------
+
 function connect(): void {
-  if (player === null) {
-    player = buildPlayer();
+  if (demoActive) {
+    return;
   }
-  player.play();
+  demoActive = true;
+  syncButtons('connecting');
+  if (mode === 'flv') {
+    if (player === null) {
+      player = buildPlayer();
+    }
+    player.play();
+  } else if (mode === 'hls') {
+    player = buildHlsPlayer();
+    player.play();
+  } else if (hevcDemo !== null) {
+    void hevcDemo.start();
+  }
 }
 
 function disconnect(): void {
-  if (player === null) {
+  if (!demoActive) {
     return;
   }
-  player.destroy();
-  player = null;
-  statusEl.textContent = STATE_LABELS.stopped;
+  if (mode === 'hevc') {
+    hevcDemo?.stop();
+  } else {
+    if (player === null) {
+      return;
+    }
+    player.destroy();
+    player = null;
+    statusEl.textContent = STATE_LABELS.stopped;
+  }
+  demoActive = false;
   syncButtons('stopped');
 }
 
-connectBtn.addEventListener('click', connect);
-disconnectBtn.addEventListener('click', disconnect);
-syncButtons('idle');
+// ---- boot --------------------------------------------------------------------
 
-Object.defineProperty(window, '__vigilkit', {
-  configurable: true,
-  value: {
+let hevcDemo: HevcDemo | null = null;
+
+async function main(): Promise<void> {
+  modeEl.textContent = mode;
+  renderer = mode === 'flv' ? createRenderer(canvas) : await createRendererAsync(canvas);
+  if (mode === 'hevc') {
+    hevcDemo = createHevcDemo(renderer, renderError);
+  }
+
+  const vigilkitExports: Record<string, unknown> = {
     get player(): Player | null {
       return player;
     },
     supports: {
       webcodecs: typeof VideoDecoder !== 'undefined',
     },
-  },
+    renderMode: renderer.renderMode,
+  };
+  if (hevcDemo !== null) {
+    vigilkitExports.hevc = hevcDemo.stats;
+  }
+  Object.defineProperty(window, '__vigilkit', {
+    configurable: true,
+    value: vigilkitExports,
+  });
+
+  connectBtn.addEventListener('click', connect);
+  disconnectBtn.addEventListener('click', disconnect);
+  syncButtons('idle');
+}
+
+main().catch((err: unknown) => {
+  renderError({ code: 'UNSUPPORTED', message: err instanceof Error ? err.message : String(err) });
+  syncButtons('error');
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ByteReader } from './byte-reader.js';
-import { DemuxError } from './errors.js';
+import { MediaFormatError } from './errors.js';
 
 describe('ByteReader', () => {
   it('reads big-endian u8/u16/u24/u32 and advances sequentially', () => {
@@ -21,6 +21,17 @@ describe('ByteReader', () => {
     expect(reader.eof()).toBe(true);
   });
 
+  it('readBytes returns a copy of the requested slice', () => {
+    const data = new Uint8Array([1, 2, 3, 4, 5]);
+    const reader = new ByteReader(data);
+    const bytes = reader.readBytes(3);
+    expect(Array.from(bytes)).toEqual([1, 2, 3]);
+    expect(bytes).not.toBe(data);
+    bytes[0] = 99;
+    expect(data[0]).toBe(1);
+    expect(reader.position).toBe(3);
+  });
+
   it('exposes position and remaining', () => {
     const reader = new ByteReader(new Uint8Array([1, 2, 3, 4]));
     expect(reader.position).toBe(0);
@@ -28,22 +39,28 @@ describe('ByteReader', () => {
     reader.skip(2);
     expect(reader.position).toBe(2);
     expect(reader.remaining).toBe(2);
+    expect(reader.eof()).toBe(false);
   });
 
-  it('throws DemuxError on an out-of-bounds read', () => {
+  it('throws MediaFormatError on an out-of-bounds read', () => {
     const reader = new ByteReader(new Uint8Array([0x01, 0x02]));
-    expect(() => reader.readU24()).toThrow(DemuxError);
+    expect(() => reader.readU24()).toThrow(MediaFormatError);
     expect(() => reader.readU32()).toThrow(/out of bounds/);
   });
 
-  it('throws DemuxError on an out-of-bounds skip', () => {
+  it('throws MediaFormatError on an out-of-bounds skip', () => {
     const reader = new ByteReader(new Uint8Array([0x01, 0x02, 0x03]));
     reader.skip(3);
     expect(reader.eof()).toBe(true);
-    expect(() => reader.skip(1)).toThrow(DemuxError);
+    expect(() => reader.skip(1)).toThrow(MediaFormatError);
   });
 
-  it('throws a DemuxError whose code is DEMUX', () => {
+  it('throws MediaFormatError on an out-of-bounds readBytes', () => {
+    const reader = new ByteReader(new Uint8Array([0x01, 0x02]));
+    expect(() => reader.readBytes(3)).toThrow(MediaFormatError);
+  });
+
+  it('throws a MediaFormatError whose code is DEMUX', () => {
     const reader = new ByteReader(new Uint8Array([0x01]));
     let thrown: unknown;
     try {
@@ -51,7 +68,7 @@ describe('ByteReader', () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(DemuxError);
+    expect(thrown).toBeInstanceOf(MediaFormatError);
     expect(thrown).toMatchObject({ code: 'DEMUX' });
   });
 });

@@ -8,3 +8,7 @@ e2e/artifacts/
 .omo/
 .local/
 coverage/
+.env
+.env.*
+*.local
+!*.example
