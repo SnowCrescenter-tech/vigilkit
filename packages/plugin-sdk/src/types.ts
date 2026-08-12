@@ -22,6 +22,11 @@ export interface EncodedAudioChunkData { type: 'key' | 'delta'; timestamp: numbe
 export type DemuxerEvent =
   | { type: 'metadata'; metadata: StreamMetadata }
   | { type: 'sequence-header'; config: VideoDecoderConfig }   // DOM type (lib DOM)
+  /**
+   * Emitted once before the first audio chunk. Consumers configure their
+   * AudioDecoder with `config`.
+   */
+  | { type: 'audio-config'; config: AudioDecoderConfig }      // DOM type (lib DOM)
   | { type: 'video'; chunk: EncodedVideoChunkData }
   | { type: 'audio'; chunk: EncodedAudioChunkData }
   | { type: 'error'; error: MediaErrorInfo };
