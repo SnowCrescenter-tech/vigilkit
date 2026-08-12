@@ -1,0 +1,38 @@
+name: Release
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: pnpm -r test
+      - run: pnpm check:licenses
+      # npm publish auth. REQUIRES the NPM_TOKEN repository secret (user
+      # action: repo Settings -> Secrets and variables -> Actions -> NPM_TOKEN,
+      # value = npm token with publish scope). Without it the publish step
+      # fails with an auth error.
+      - name: Configure npm auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+      # verify-pack asserts every tarball is publishable (dist present, no
+      # node_modules, workspace:* resolved) BEFORE anything reaches the registry.
+      - run: node scripts/verify-pack.mjs
+      # publish-all publishes the 8 packages in dependency order
+      # (plugin-sdk -> media-utils -> plugin-flv -> plugin-ws -> plugin-hls ->
+      # vigilkit -> plugin-hevc-wasm -> renderer), aborting on the first failure.
+      - run: node scripts/publish-all.mjs
