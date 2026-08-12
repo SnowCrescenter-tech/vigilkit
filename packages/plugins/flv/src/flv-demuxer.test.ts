@@ -94,7 +94,7 @@ describe('FlvDemuxer', () => {
     demuxer.close();
   });
 
-  it('emits a video event with Annex-B data for a key frame NALU after the seq header', () => {
+  it('emits a video event with length-prefixed (avc) data for a key frame NALU after the seq header', () => {
     const demuxer = new FlvDemuxer();
     const events = collect(demuxer);
     demuxer.push(concat(header(), videoSeqTag(), videoNaluTag(NALU, 1, 33)));
@@ -102,9 +102,10 @@ describe('FlvDemuxer', () => {
     expect(videos).toHaveLength(1);
     expect(videos[0]?.chunk.type).toBe('key');
     expect(videos[0]?.chunk.timestamp).toBe(33 * 1000);
-    expect(Array.from(videos[0]?.chunk.data.slice(0, 4) as Uint8Array)).toEqual([
-      0x00, 0x00, 0x00, 0x01,
-    ]);
+    // The sequence header carries the avcC description, so WebCodecs expects
+    // avc-format chunks: the 4-byte big-endian NALU length prefix must be
+    // preserved (0x00000003 here), not replaced by an Annex-B start code.
+    expect(Array.from(videos[0]?.chunk.data as Uint8Array)).toEqual(Array.from(NALU));
     demuxer.close();
   });
 
@@ -207,6 +208,21 @@ describe('FlvDemuxer', () => {
     expect(metas.length).toBeGreaterThanOrEqual(1);
     for (const seq of seqs) {
       expect(seq.config.codec).toMatch(/^avc1\.[0-9a-f]{6}$/);
+    }
+    for (const video of videos) {
+      const data = video.chunk.data;
+      if (data.length >= 4) {
+        // avc format: the first 4 bytes are the big-endian NALU length
+        // (Annex-B start codes 0x00000001 would also be a length of 1, so this
+        // is a sanity guard against malformed/garbage payloads, not a
+        // start-code check).
+        const length = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(
+          0,
+          false,
+        );
+        expect(length).toBeGreaterThan(0);
+        expect(length).toBeLessThan(65536);
+      }
     }
     demuxer.close();
   });

@@ -1,5 +1,5 @@
 import type { Demuxer, DemuxerEvent, StreamMetadata } from '@vigilkit/plugin-sdk';
-import { naluToAnnexB, parseAvcC } from './avc.js';
+import { parseAvcC } from './avc.js';
 import { parseScriptData } from './amf0.js';
 import { ByteReader } from './byte-reader.js';
 import {
@@ -193,7 +193,11 @@ export class FlvDemuxer implements Demuxer {
         chunk: {
           type: frameType === AvcFrameType.KEY ? 'key' : 'delta',
           timestamp: timestampMs * 1000,
-          data: naluToAnnexB(data.subarray(5)),
+          // The sequence header config carries the avcC `description`, which
+          // tells WebCodecs to expect avc format (4-byte big-endian
+          // length-prefixed NALUs), so pass the raw length-prefixed payload
+          // through unchanged — never Annex-B converted.
+          data: data.subarray(5),
         },
       });
     }
