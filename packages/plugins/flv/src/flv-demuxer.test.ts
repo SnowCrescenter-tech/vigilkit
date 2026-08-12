@@ -14,6 +14,7 @@ import {
   u32,
   videoNaluTag,
   videoSeqTag,
+  type AudioConfigEvent,
   type AudioEvent,
   type MetadataEvent,
   type SeqEvent,
@@ -132,17 +133,32 @@ describe('FlvDemuxer', () => {
     demuxer.close();
   });
 
-  it('emits audio events for AAC seq header and raw packets', () => {
+  it('emits an audio-config event from the AAC sequence header', () => {
     const demuxer = new FlvDemuxer();
     const events = collect(demuxer);
     const aacConfig = new Uint8Array([0x12, 0x10]);
+    demuxer.push(concat(header(), aacTag(0, aacConfig, 10)));
+    const configs = events.filter((e): e is AudioConfigEvent => e.type === 'audio-config');
+    expect(configs).toHaveLength(1);
+    expect(configs[0]?.config.codec).toBe('mp4a.40.2');
+    expect(configs[0]?.config.sampleRate).toBe(44100);
+    expect(configs[0]?.config.numberOfChannels).toBe(2);
+    expect(Array.from(configs[0]?.config.description as Uint8Array)).toEqual(Array.from(aacConfig));
+    expect(events.filter((e) => e.type === 'audio')).toHaveLength(0);
+    demuxer.close();
+  });
+
+  it('emits raw audio chunks for AAC RAW packets with no ASC prefix', () => {
+    const demuxer = new FlvDemuxer();
+    const events = collect(demuxer);
     const raw = new Uint8Array([0x21, 0x00, 0xaa]);
-    demuxer.push(concat(header(), aacTag(0, aacConfig, 10), aacTag(1, raw, 20)));
+    demuxer.push(concat(header(), aacTag(1, raw, 20)));
     const audios = events.filter((e): e is AudioEvent => e.type === 'audio');
-    expect(audios).toHaveLength(2);
+    expect(audios).toHaveLength(1);
     expect(audios[0]?.chunk.type).toBe('key');
-    expect(Array.from(audios[0]?.chunk.data as Uint8Array)).toEqual(Array.from(aacConfig));
-    expect(audios[1]?.chunk.timestamp).toBe(20 * 1000);
+    expect(audios[0]?.chunk.timestamp).toBe(20 * 1000);
+    expect(Array.from(audios[0]?.chunk.data as Uint8Array)).toEqual(Array.from(raw));
+    expect(events.filter((e) => e.type === 'audio-config')).toHaveLength(0);
     demuxer.close();
   });
 
@@ -236,10 +252,7 @@ describe('FlvDemuxer', () => {
         // (Annex-B start codes 0x00000001 would also be a length of 1, so this
         // is a sanity guard against malformed/garbage payloads, not a
         // start-code check).
-        const length = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(
-          0,
-          false,
-        );
+        const length = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, false);
         expect(length).toBeGreaterThan(0);
         expect(length).toBeLessThan(65536);
       }
