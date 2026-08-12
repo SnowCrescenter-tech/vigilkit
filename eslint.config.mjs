@@ -12,4 +12,10 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // Ambient .d.ts declaration files use `declare var` (the only legal form);
+    // no-var is a false positive there.
+    files: ['**/*.d.ts'],
+    rules: { 'no-var': 'off' },
+  },
 );
