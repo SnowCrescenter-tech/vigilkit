@@ -137,13 +137,12 @@ importers:
 
   packages/renderer:
     dependencies:
-      vigilkit:
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
       '@webgpu/types':
         specifier: ^0.1.65
         version: 0.1.71
+      vigilkit:
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 
