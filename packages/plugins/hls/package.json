@@ -1,7 +1,7 @@
 {
-  "name": "@vigilkit/plugin-flv",
+  "name": "@vigilkit/plugin-hls",
   "version": "0.1.0",
-  "description": "FLV demuxer plugin for vigilkit (H.264/AAC)",
+  "description": "HLS media source plugin for vigilkit (m3u8 + MPEG-TS H.264/AAC)",
   "type": "module",
   "license": "Apache-2.0",
   "sideEffects": false,
@@ -20,8 +20,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vigilkit/media-utils": "workspace:*",
-    "@vigilkit/plugin-sdk": "workspace:*"
+    "@vigilkit/plugin-sdk": "workspace:*",
+    "@vigilkit/media-utils": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"

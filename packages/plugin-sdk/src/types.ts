@@ -7,6 +7,7 @@ export interface MediaErrorInfo { code: MediaErrorCode; message: string; }
 export interface StreamMetadata {
   width?: number; height?: number; framerate?: number; duration?: number;
   hasAudio: boolean; hasVideo: boolean; codec?: string;
+  sampleRate?: number; channels?: number;
 }
 
 export interface EncodedVideoChunkData {

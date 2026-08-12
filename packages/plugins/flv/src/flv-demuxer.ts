@@ -1,7 +1,6 @@
+import { ByteReader, MediaFormatError, parseAvcC } from '@vigilkit/media-utils';
 import type { Demuxer, DemuxerEvent, StreamMetadata } from '@vigilkit/plugin-sdk';
-import { parseAvcC } from './avc.js';
 import { parseScriptData } from './amf0.js';
-import { ByteReader } from './byte-reader.js';
 import {
   AvcFrameType,
   AvcPacketType,
@@ -177,7 +176,19 @@ export class FlvDemuxer implements Demuxer {
     const packetType = data[1] as number;
     if (packetType === AvcPacketType.SEQ) {
       this.hasSeqHeader = true;
-      this.emit({ type: 'sequence-header', config: parseAvcC(data.subarray(5)) });
+      try {
+        this.emit({ type: 'sequence-header', config: parseAvcC(data.subarray(5)) });
+      } catch (error) {
+        // media-utils throws MediaFormatError (code 'DEMUX') on malformed
+        // avcC; surface it through the demuxer's event surface like any
+        // other framing failure rather than leaking a foreign error type.
+        if (error instanceof MediaFormatError) {
+          this.emitError('DEMUX', error.message);
+          this.failed = true;
+          return;
+        }
+        throw error;
+      }
       return;
     }
     if (packetType === AvcPacketType.NALU) {
