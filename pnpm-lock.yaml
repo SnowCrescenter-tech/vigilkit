@@ -64,6 +64,8 @@ importers:
         specifier: workspace:*
         version: link:../plugin-sdk
 
+  packages/media-utils: {}
+
   packages/plugin-sdk: {}
 
   packages/plugins/flv:
