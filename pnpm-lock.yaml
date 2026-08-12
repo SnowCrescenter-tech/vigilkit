@@ -38,6 +38,12 @@ importers:
       '@vigilkit/plugin-flv':
         specifier: workspace:*
         version: link:../../packages/plugins/flv
+      '@vigilkit/plugin-hevc-wasm':
+        specifier: workspace:*
+        version: link:../../packages/plugins/hevc-wasm
+      '@vigilkit/plugin-hls':
+        specifier: workspace:*
+        version: link:../../packages/plugins/hls
       '@vigilkit/plugin-ws':
         specifier: workspace:*
         version: link:../../packages/plugins/ws
