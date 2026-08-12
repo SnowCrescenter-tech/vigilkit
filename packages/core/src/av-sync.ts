@@ -34,7 +34,12 @@ export class AvSyncClock {
     }
     const currentMs = nowMs ?? this.now();
     const elapsedMs = currentMs - this.baseTimeMs;
-    const ptsElapsedMs = (ptsUs - this.basePtsUs) / 1000;
+    // Surveillance/FLV streams carry a 33-bit microsecond PTS counter that
+    // wraps every ~2.4h. Unwrap the delta so a wrapped PTS reads as the next
+    // frame instead of ~-8.6M ms of lateness.
+    const wrap = 2 ** 33;
+    const residue = ((ptsUs - this.basePtsUs) % wrap + wrap) % wrap;
+    const ptsElapsedMs = (residue > wrap / 2 ? residue - wrap : residue) / 1000;
     return ptsElapsedMs - elapsedMs;
   }
 }

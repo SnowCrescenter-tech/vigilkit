@@ -17,6 +17,10 @@ const FLV_MAGIC_1 = 0x4c; // 'L'
 const FLV_MAGIC_2 = 0x56; // 'V'
 const EXT_TIMESTAMP_MARKER = 0xffffff;
 const EXT_TIMESTAMP_SIZE = 4;
+/** Largest acceptable tag payload. A u24 dataSize field maxes at 0xFFFFFF
+ * (16MB - 1); anything at or above that ceiling is treated as corrupt rather
+ * than making the demuxer buffer ~16MB of data that never arrives. */
+const MAX_TAG_SIZE = 16 * 1024 * 1024 - 1;
 
 type Listener = (event: DemuxerEvent) => void;
 
@@ -111,6 +115,11 @@ export class FlvDemuxer implements Demuxer {
     const start = this.cursor;
     const tagType = q[start] as number;
     const dataSize = readU24At(q, start + 1);
+    if (dataSize >= MAX_TAG_SIZE) {
+      this.emitError('DEMUX', 'tag exceeds maximum size');
+      this.failed = true;
+      return false;
+    }
     const tsLower = readU24At(q, start + 4);
     let timestampMs = (q[start + 7] as number) * 0x1000000 + tsLower;
     let contentOffset = 0;

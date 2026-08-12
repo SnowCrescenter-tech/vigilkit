@@ -1,19 +1,17 @@
 import { PluginRegistry } from '@vigilkit/plugin-sdk';
 import type {
-  Demuxer,
   DemuxerEvent,
   DemuxerPlugin,
   MediaErrorInfo,
   SourcePlugin,
   StreamMetadata,
-  Transport,
-  TransportEvent,
 } from '@vigilkit/plugin-sdk';
 import { buildDecoder } from './decoder-chain.js';
 import { nativeDecoderFactory } from './decoder.js';
 import type { VideoCodecDecoder, VideoDecoderFactory } from './decoder.js';
 import { Scheduler } from './scheduler.js';
 import { SourceBranch } from './source-branch.js';
+import { TransportPipeline } from './transport-pipeline.js';
 import { Emitter } from './events.js';
 import { mediaError } from './errors.js';
 import { asMediaError, schemeOf } from './plugin-utils.js';
@@ -33,10 +31,7 @@ export class Engine implements Player {
   private readonly decoder: VideoCodecDecoder;
   private readonly scheduler: Scheduler;
   private readonly errors: MediaErrorInfo[] = [];
-  private transport: Transport | null = null;
-  private transportUnsub: (() => void) | null = null;
-  private demuxer: Demuxer | null = null;
-  private demuxerUnsub: (() => void) | null = null;
+  private readonly pipeline: TransportPipeline;
   private readonly sourceBranch = new SourceBranch();
   private pumpId: ReturnType<typeof setInterval> | null = null;
   private state: PlayerState = 'idle';
@@ -54,6 +49,17 @@ export class Engine implements Player {
     this.decoder.onError((info) => this.handleError(info));
     this.scheduler = new Scheduler(this.decoder, options.renderer, {
       onFrame: (frame, ptsUs) => this.emitter.emit('frame', { frame, ptsUs }),
+      onError: (info) => this.handleError(info),
+    });
+    this.pipeline = new TransportPipeline({
+      demuxerEvent: (event) => this.handleDemuxerEvent(event),
+      onOpen: () => {
+        if (this.state === 'connecting') {
+          this.setState('playing');
+        }
+      },
+      onClose: () => this.handlePipelineClose(),
+      onError: (info) => this.handleError(info),
     });
   }
 
@@ -87,11 +93,7 @@ export class Engine implements Player {
     }
     this.destroyed = true;
     this.stopPump();
-    this.unsubscribeAll();
-    this.transport?.close();
-    this.transport = null;
-    this.demuxer?.close();
-    this.demuxer = null;
+    this.pipeline.teardown();
     this.sourceBranch.disconnect();
     this.decoder.close();
     this.options.renderer?.destroy();
@@ -155,13 +157,10 @@ export class Engine implements Player {
       this.handleError(mediaError('UNSUPPORTED', `no transport plugin for url scheme "${scheme}"`));
       return;
     }
-    const transport = transportPlugin.create(this.options.url);
-    const demuxer = demuxerPlugin.create();
-    this.transport = transport;
-    this.demuxer = demuxer;
-    this.transportUnsub = transport.onEvent((event) => this.handleTransportEvent(event));
-    this.demuxerUnsub = demuxer.onEvent((event) => this.handleDemuxerEvent(event));
-    transport.connect();
+    if (!this.pipeline.start(transportPlugin, demuxerPlugin, this.options.url)) {
+      // A plugin create() failed; the pipeline already surfaced the error.
+      return;
+    }
     this.startPump();
   }
 
@@ -192,23 +191,17 @@ export class Engine implements Player {
     return this.registry.getSource(scheme);
   }
 
-  private handleTransportEvent(event: TransportEvent): void {
-    switch (event.type) {
-      case 'open':
-        if (this.state === 'connecting') {
-          this.setState('playing');
-        }
-        break;
-      case 'data':
-        this.demuxer?.push(event.data);
-        break;
-      case 'close':
-        // v0.1: a clean close without a prior error ends the stream silently.
-        break;
-      case 'error':
-        this.handleError(event.error);
-        break;
+  /** A transport 'close': connect failure while connecting, clean stop otherwise. */
+  private handlePipelineClose(): void {
+    if (this.state === 'connecting') {
+      // Closed before the handshake completed: treat it as a failed connect,
+      // not a clean end-of-stream.
+      this.handleError(mediaError('TRANSPORT', 'transport closed before connecting'));
+      return;
     }
+    this.stopPump();
+    this.pipeline.teardown();
+    this.setState('stopped');
   }
 
   private handleDemuxerEvent(event: DemuxerEvent): void {
@@ -237,21 +230,10 @@ export class Engine implements Player {
     }
     this.errors.push(info);
     this.stopPump();
-    this.unsubscribeAll();
-    this.transport?.close();
-    this.transport = null;
-    this.demuxer?.close();
-    this.demuxer = null;
+    this.pipeline.teardown();
     this.sourceBranch.disconnect();
     this.setState('error');
     this.emitter.emit('error', info);
-  }
-
-  private unsubscribeAll(): void {
-    this.transportUnsub?.();
-    this.transportUnsub = null;
-    this.demuxerUnsub?.();
-    this.demuxerUnsub = null;
   }
 
   private setState(state: PlayerState): void {

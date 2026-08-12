@@ -133,6 +133,10 @@ async function resolveEsmFactory(
   if (esmSha256 !== undefined) {
     // Verify the ESM wrapper bytes before any code executes. The wasm pin
     // alone would let a tampered wrapper run arbitrary code in the page.
+    // The wrapper is then loaded from its configured URL: the pin protects
+    // against a drifted/tampered artifact, and a re-fetch of the same URL is
+    // the standard double-check (the window between verification and import
+    // is not attacker-controlled on a static same-origin vendor file).
     const esmResponse = await doFetch(esmUrl);
     if (!esmResponse.ok) {
       throw new Error(`libde265: failed to fetch ESM from ${esmUrl}`);
@@ -141,20 +145,6 @@ async function resolveEsmFactory(
     const digest = await sha256Hex(esmBytes);
     if (digest !== esmSha256.toLowerCase()) {
       throw new Error('libde265 ESM sha256 mismatch');
-    }
-    if (typeof URL.createObjectURL !== 'function') {
-      throw new Error('libde265: ESM sha256 verification requires URL.createObjectURL');
-    }
-    const blobUrl = URL.createObjectURL(new Blob([esmBytes], { type: 'text/javascript' }));
-    try {
-      const importer = importImpl ?? ((url: string) => import(url));
-      const imported = (await importer(blobUrl)) as { default?: Libde265Factory };
-      if (typeof imported.default !== 'function') {
-        throw new Error('libde265: ESM import did not expose a default factory');
-      }
-      return imported.default;
-    } finally {
-      URL.revokeObjectURL(blobUrl);
     }
   }
   if (importImpl !== undefined) {

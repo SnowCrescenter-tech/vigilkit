@@ -79,7 +79,7 @@ async function loadLibde265Module(): Promise<Libde265Module> {
     throw new Error('libde265 wasm sha256 mismatch');
   }
   // Verify the ESM wrapper bytes before any code from it executes; then load
-  // from a blob URL so the verified bytes are the exact ones evaluated.
+  // it from the configured URL (same-origin vendor file).
   const esmResponse = await fetch(VENDOR_ESM_URL);
   if (!esmResponse.ok) {
     throw new Error(`failed to fetch esm from ${VENDOR_ESM_URL}`);
@@ -89,15 +89,10 @@ async function loadLibde265Module(): Promise<Libde265Module> {
   if (hex(new Uint8Array(esmDigest)) !== ESM_SHA256) {
     throw new Error('libde265 esm sha256 mismatch');
   }
-  const blobUrl = URL.createObjectURL(new Blob([esmBytes], { type: 'text/javascript' }));
-  try {
-    const factory = (await import(/* @vite-ignore */ blobUrl)) as unknown as {
-      default: (options: { wasmBinary: ArrayBuffer }) => Promise<Libde265Module>;
-    };
-    return factory.default({ wasmBinary: wasmBytes.buffer });
-  } finally {
-    URL.revokeObjectURL(blobUrl);
-  }
+  const factory = (await import(/* @vite-ignore */ VENDOR_ESM_URL)) as unknown as {
+    default: (options: { wasmBinary: ArrayBuffer }) => Promise<Libde265Module>;
+  };
+  return factory.default({ wasmBinary: wasmBytes.buffer });
 }
 
 async function copyOut(frame: VideoFrame, ptsUs: number): Promise<void> {

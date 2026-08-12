@@ -6,6 +6,18 @@ import type { Mock } from 'vitest';
  * so tests can assert renderer behavior without a real GPU. Enum constants
  * carry real WebGL2 values so recorded calls are inspectable.
  */
+export interface FakeGLOptions {
+  /** getShaderParameter returns false (shader compile fails). */
+  failShaderCompile?: boolean;
+  /** getProgramParameter returns false (program link fails). */
+  failProgramLink?: boolean;
+  /** createProgram returns null. */
+  failCreateProgram?: boolean;
+  /** createBuffer returns null. */
+  failCreateBuffer?: boolean;
+  /** createTexture returns null. */
+  failCreateTexture?: boolean;
+}
 export interface FakeGL {
   // enum constants (real WebGL2 values)
   readonly TEXTURE_2D: number;
@@ -57,7 +69,7 @@ export interface FakeGL {
   readonly deleteBuffer: Mock;
 }
 
-export function createFakeGL(): FakeGL {
+export function createFakeGL(options: FakeGLOptions = {}): FakeGL {
   return {
     TEXTURE_2D: 0x0de1,
     RGBA: 0x1908,
@@ -79,20 +91,20 @@ export function createFakeGL(): FakeGL {
     createShader: vi.fn(() => ({})),
     shaderSource: vi.fn(),
     compileShader: vi.fn(),
-    getShaderParameter: vi.fn(() => true),
-    createProgram: vi.fn(() => ({})),
+    getShaderParameter: vi.fn(() => !options.failShaderCompile),
+    createProgram: vi.fn(() => (options.failCreateProgram ? null : {})),
     attachShader: vi.fn(),
     linkProgram: vi.fn(),
-    getProgramParameter: vi.fn(() => true),
+    getProgramParameter: vi.fn(() => !options.failProgramLink),
     getAttribLocation: vi.fn(() => 0),
     getUniformLocation: vi.fn(() => ({})),
-    createBuffer: vi.fn(() => ({})),
+    createBuffer: vi.fn(() => (options.failCreateBuffer ? null : {})),
     bindBuffer: vi.fn(),
     bufferData: vi.fn(),
     enableVertexAttribArray: vi.fn(),
     vertexAttribPointer: vi.fn(),
     useProgram: vi.fn(),
-    createTexture: vi.fn(() => ({})),
+    createTexture: vi.fn(() => (options.failCreateTexture ? null : {})),
     bindTexture: vi.fn(),
     texParameteri: vi.fn(),
     texImage2D: vi.fn(),

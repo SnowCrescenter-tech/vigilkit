@@ -80,45 +80,34 @@ describe('loadLibde265', () => {
   });
 
   it('verifies the ESM wrapper bytes (esmSha256) before import', async () => {
-    vi.stubGlobal('URL', {
-      ...URL,
-      createObjectURL: vi.fn(() => 'blob:esm-verified'),
-      revokeObjectURL: vi.fn(),
+    const wasmBytes = new Uint8Array([5, 6, 7, 8]);
+    const expected = await sha256Hex(wasmBytes);
+    const esmBytes = new TextEncoder().encode('async function Module() {}');
+    const esmExpected = await sha256Hex(esmBytes);
+    const module = fakeModule();
+    let esmEvaluated = false;
+
+    const loaded = await loadLibde265({
+      esmUrl: 'https://example.test/libde265-esm.js',
+      wasmUrl: 'https://example.test/libde265.wasm',
+      sha256: expected,
+      esmSha256: esmExpected,
+      fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('.wasm')) {
+          return { ok: true, arrayBuffer: async () => wasmBytes.buffer as ArrayBuffer } as Response;
+        }
+        return { ok: true, arrayBuffer: async () => esmBytes.buffer as ArrayBuffer } as Response;
+      }) as unknown as typeof fetch,
+      importImpl: vi.fn(async (url: string) => {
+        expect(url).toBe('https://example.test/libde265-esm.js');
+        esmEvaluated = true;
+        return { default: async () => module };
+      }),
     });
-    try {
-      const wasmBytes = new Uint8Array([5, 6, 7, 8]);
-      const expected = await sha256Hex(wasmBytes);
-      const esmBytes = new TextEncoder().encode('async function Module() {}');
-      const esmExpected = await sha256Hex(esmBytes);
-      const module = fakeModule();
-      let esmEvaluated = false;
 
-      const loaded = await loadLibde265({
-        esmUrl: 'https://example.test/libde265-esm.js',
-        wasmUrl: 'https://example.test/libde265.wasm',
-        sha256: expected,
-        esmSha256: esmExpected,
-        fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
-          const url = String(input);
-          if (url.endsWith('.wasm')) {
-            return { ok: true, arrayBuffer: async () => wasmBytes.buffer as ArrayBuffer } as Response;
-          }
-          return { ok: true, arrayBuffer: async () => esmBytes.buffer as ArrayBuffer } as Response;
-        }) as unknown as typeof fetch,
-        importImpl: vi.fn(async (url: string) => {
-          if (url === 'blob:esm-verified') {
-            esmEvaluated = true;
-            return { default: async () => module };
-          }
-          throw new Error(`unexpected import url ${url}`);
-        }),
-      });
-
-      expect(loaded).toBe(module);
-      expect(esmEvaluated).toBe(true);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(loaded).toBe(module);
+    expect(esmEvaluated).toBe(true);
   });
 
   it('rejects when the ESM wrapper sha does not match the pin', async () => {

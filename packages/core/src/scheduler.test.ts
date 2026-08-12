@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Scheduler } from './scheduler.js';
 import { VideoDecoderWrapper } from './decoder.js';
-import type { EncodedVideoChunkData } from '@vigilkit/plugin-sdk';
+import type { EncodedVideoChunkData, MediaErrorInfo } from '@vigilkit/plugin-sdk';
 import {
   FakeEncodedVideoChunk,
   FakeVideoDecoder,
@@ -20,7 +20,11 @@ function fakeRenderer(): RendererSurface {
 
 function makeScheduler(
   renderer: RendererSurface | null,
-  opts: { latencyBudgetMs?: number; now?: () => number } = {},
+  opts: {
+    latencyBudgetMs?: number;
+    now?: () => number;
+    onError?: (info: MediaErrorInfo) => void;
+  } = {},
 ) {
   let fake: FakeVideoDecoder | null = null;
   const wrapper = new VideoDecoderWrapper((handlers) => {
@@ -78,6 +82,28 @@ describe('Scheduler', () => {
     expect(scheduler.getStats().framesDecoded).toBe(0);
   });
 
+  it('drop-late boundary: a chunk at exactly now - latencyBudget is kept, not dropped', () => {
+    let nowMs = 0;
+    const renderer = fakeRenderer();
+    const { scheduler, getFake } = makeScheduler(renderer, { now: () => nowMs, latencyBudgetMs: 1000 });
+    scheduler.enqueue(chunk(2000)); // base: pts 2000 at wall 0
+    nowMs = 1000; // lateness == -1000 == -budget -> break, keep
+    scheduler.tick();
+    expect(scheduler.getStats().framesDropped).toBe(0);
+    expect(getFake()!.decodeCalls).toHaveLength(1);
+  });
+
+  it('drop-late boundary: a chunk one ms past now - latencyBudget is dropped', () => {
+    let nowMs = 0;
+    const renderer = fakeRenderer();
+    const { scheduler, getFake } = makeScheduler(renderer, { now: () => nowMs, latencyBudgetMs: 1000 });
+    scheduler.enqueue(chunk(2000));
+    nowMs = 1001; // lateness == -1001 < -budget -> drop
+    scheduler.tick();
+    expect(scheduler.getStats().framesDropped).toBe(1);
+    expect(getFake()!.decodeCalls).toHaveLength(0);
+  });
+
   it('calls renderer.draw once per rendered frame', () => {
     const renderer = fakeRenderer();
     const { scheduler, getFake } = makeScheduler(renderer, { now: () => 0 });
@@ -122,5 +148,34 @@ describe('Scheduler', () => {
     scheduler.tick();
     expect(getFake()!.decodeCalls).toHaveLength(0);
     expect(scheduler.getStats().framesDecoded).toBe(0);
+  });
+
+  it('a renderer whose draw() throws surfaces a RENDERER error and subsequent ticks continue', () => {
+    const draw = vi.fn();
+    draw.mockImplementationOnce(() => {
+      throw new Error('draw exploded');
+    });
+    const renderer: RendererSurface = {
+      renderMode: 'webgl2',
+      draw,
+      resize: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const errors: MediaErrorInfo[] = [];
+    const { scheduler, getFake } = makeScheduler(renderer, {
+      now: () => 0,
+      onError: (info) => errors.push(info),
+    });
+    scheduler.enqueue(chunk(1000));
+    scheduler.enqueue(chunk(2000));
+    scheduler.tick();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('RENDERER');
+    expect(errors[0]?.message).toBe('draw exploded');
+    expect(getFake()!.decodeCalls).toHaveLength(1);
+    scheduler.tick();
+    expect(errors).toHaveLength(1);
+    expect(renderer.draw).toHaveBeenCalledTimes(2);
+    expect(scheduler.getStats().framesDecoded).toBe(2);
   });
 });

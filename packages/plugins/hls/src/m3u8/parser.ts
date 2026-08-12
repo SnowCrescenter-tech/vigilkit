@@ -78,7 +78,11 @@ export function parseM3u8(text: string): Playlist {
           resolution: parseResolution(attrs.get('RESOLUTION')),
         };
       } else if (line.startsWith('#EXTINF:')) {
-        pendingDuration = Number.parseFloat(line.slice('#EXTINF:'.length));
+        const duration = Number.parseFloat(line.slice('#EXTINF:'.length));
+        // A missing/unparseable duration (#EXTINF: with no number) must not
+        // produce a NaN-duration segment: treat it as no pending EXTINF so the
+        // following URI is dropped like any orphan.
+        pendingDuration = Number.isFinite(duration) ? duration : null;
       } else if (line.startsWith('#EXT-X-BYTERANGE:')) {
         const [lengthText, offsetText] = line.slice('#EXT-X-BYTERANGE:'.length).split('@');
         const length = Number(lengthText);

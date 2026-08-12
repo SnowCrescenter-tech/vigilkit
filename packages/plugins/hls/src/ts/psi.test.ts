@@ -35,6 +35,25 @@ describe('parsePat', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toEqual({ programNumber: 1, pmtPid: 0x100 });
   });
+
+  it('selects the first non-network program from a multi-program PAT', () => {
+    const pat = section(0x00, [
+      0x00, 0x01,
+      0xc1, 0x00, 0x00,
+      0x00, 0x00, // network entry (program_number 0)
+      0xe0, 0x10,
+      0x00, 0x01, // program 1
+      0xe1, 0x00,
+      0x00, 0x02, // program 2
+      0xe1, 0x50,
+    ]);
+    const entries = parsePat(pat);
+    expect(entries).toHaveLength(2);
+    // The first entry (which the TsDemuxer selects) must be the first
+    // non-network program, never the network PID.
+    expect(entries[0]).toEqual({ programNumber: 1, pmtPid: 0x100 });
+    expect(entries[1]).toEqual({ programNumber: 2, pmtPid: 0x150 });
+  });
 });
 
 describe('parsePmt', () => {

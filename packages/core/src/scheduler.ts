@@ -1,9 +1,10 @@
-import type { EncodedVideoChunkData } from '@vigilkit/plugin-sdk';
+import type { EncodedVideoChunkData, MediaErrorInfo } from '@vigilkit/plugin-sdk';
 import { JitterBuffer } from './jitter-buffer.js';
 import { AvSyncClock } from './av-sync.js';
 import { DECODER_HIGH_WATER } from './decoder.js';
 import type { VideoCodecDecoder } from './decoder.js';
 import type { RendererSurface } from './types.js';
+import { mediaError } from './errors.js';
 
 export interface SchedulerStats {
   framesDecoded: number;
@@ -15,6 +16,7 @@ export interface SchedulerOptions {
   latencyBudgetMs?: number;
   now?: () => number;
   onFrame?: (frame: VideoFrame, ptsUs: number) => void;
+  onError?: (info: MediaErrorInfo) => void;
 }
 
 /**
@@ -30,6 +32,7 @@ export class Scheduler {
   private readonly renderer: RendererSurface | null;
   private readonly latencyBudgetMs: number;
   private readonly onFrame: ((frame: VideoFrame, ptsUs: number) => void) | undefined;
+  private readonly onError: ((info: MediaErrorInfo) => void) | undefined;
   private readonly now: () => number;
   private clockReset = false;
   private framesDecoded = 0;
@@ -45,6 +48,7 @@ export class Scheduler {
     this.renderer = renderer;
     this.latencyBudgetMs = options.latencyBudgetMs ?? 1000;
     this.onFrame = options.onFrame;
+    this.onError = options.onError;
     this.now = options.now ?? (() => performance.now());
     this.clock = new AvSyncClock(this.now);
     decoder.onOutput((frame, ptsUs) => this.handleOutput(frame, ptsUs));
@@ -96,7 +100,15 @@ export class Scheduler {
     this.recordDecode();
     this.onFrame?.(frame, ptsUs);
     if (this.renderer !== null) {
-      this.renderer.draw(frame);
+      try {
+        this.renderer.draw(frame);
+      } catch (error) {
+        // A throwing renderer must not escape the pump: surface it as a
+        // RENDERER error. The frame is the renderer's responsibility once
+        // draw() is handed it (its own finally closes it).
+        const message = error instanceof Error ? error.message : 'renderer draw failed';
+        this.onError?.(mediaError('RENDERER', message));
+      }
     } else {
       frame.close();
     }

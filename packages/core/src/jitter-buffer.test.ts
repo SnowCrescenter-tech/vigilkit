@@ -51,6 +51,30 @@ describe('JitterBuffer', () => {
     expect(buffer.peek()?.id).toBe('c');
   });
 
+  it('capacity 1 overflow drops the oldest on every push', () => {
+    const onOverflow = vi.fn();
+    const buffer = new JitterBuffer<Item>({ capacity: 1, onOverflow });
+    buffer.push({ timestamp: 1, id: 'a' });
+    buffer.push({ timestamp: 2, id: 'b' });
+    expect(onOverflow).toHaveBeenCalledTimes(1);
+    expect(onOverflow).toHaveBeenNthCalledWith(1, 1);
+    expect(buffer.size).toBe(1);
+    expect(buffer.peek()?.id).toBe('b');
+    buffer.push({ timestamp: 3, id: 'c' });
+    expect(onOverflow).toHaveBeenCalledTimes(2);
+    expect(buffer.peek()?.id).toBe('c');
+  });
+
+  it('equal-timestamp pushes stay FIFO-stable across capacity overflow', () => {
+    const onOverflow = vi.fn();
+    const buffer = new JitterBuffer<Item>({ capacity: 2, onOverflow });
+    buffer.push({ timestamp: 5, id: 'first' });
+    buffer.push({ timestamp: 5, id: 'second' });
+    buffer.push({ timestamp: 5, id: 'third' });
+    expect(onOverflow).toHaveBeenNthCalledWith(1, 1);
+    expect([buffer.next()?.id, buffer.next()?.id]).toEqual(['second', 'third']);
+  });
+
   it('peek is non-destructive', () => {
     const buffer = new JitterBuffer<Item>();
     buffer.push({ timestamp: 7, id: 'x' });
