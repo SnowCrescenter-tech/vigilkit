@@ -19,13 +19,15 @@
     "scripts":  {
                     "build":  "tsup src/index.ts --format esm --dts --clean",
                     "test":  "vitest run",
-                    "typecheck":  "tsc --noEmit"
+                    "typecheck":  "tsc --noEmit",
+                    "postbuild":  "node scripts/inject-webgpu-ref.mjs"
                 },
     "devDependencies":  {
-                            "@webgpu/types":  "^0.1.65"
+
                         },
     "dependencies":  {
-                         "vigilkit":  "workspace:*"
+                         "vigilkit":  "workspace:*",
+                         "@webgpu/types":  "^0.1.65"
                      },
     "publishConfig":  {
                           "access":  "public"
