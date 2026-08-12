@@ -10,6 +10,22 @@ export interface VideoDecoderHandlers {
 
 export type VideoDecoderFactory = (handlers: VideoDecoderHandlers) => VideoDecoder;
 
+/**
+ * Decoder contract consumed by the scheduler/engine. Satisfied by the
+ * WebCodecs-backed `VideoDecoderWrapper` and by soft (WASM/JS) decoders so the
+ * pipeline can route between codec implementations without knowing the backend.
+ */
+export interface VideoCodecDecoder {
+  configure(config: VideoDecoderConfig): void;
+  decode(chunk: EncodedVideoChunkData): void;
+  flush(): Promise<void>;
+  reset(): void;
+  close(): void;
+  readonly queueSize: number;
+  onOutput(cb: (frame: VideoFrame, ptsUs: number) => void): void;
+  onError(cb: (info: MediaErrorInfo) => void): void;
+}
+
 /** Default browser factory: wires the native decoder to the wrapper handlers. */
 export const nativeDecoderFactory: VideoDecoderFactory = (handlers) =>
   new VideoDecoder({
@@ -28,7 +44,7 @@ interface OutputEntry {
  * queue (with their PTS) and forwarded synchronously to the `onOutput` listener
  * once one is registered.
  */
-export class VideoDecoderWrapper {
+export class VideoDecoderWrapper implements VideoCodecDecoder {
   private decoder: VideoDecoder | null = null;
   private readonly outputs: OutputEntry[] = [];
   private outputCb: ((frame: VideoFrame, ptsUs: number) => void) | null = null;
