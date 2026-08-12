@@ -29,6 +29,13 @@ export interface PlayerOptions {
   softDecoder?: { factory: SoftVideoDecoderFactory };
   /** Bypass the WebCodecs capability probe and always use the soft decoder when it supports the codec. */
   forceSoft?: boolean;
+  /**
+   * Advanced: override the frame-scheduling drivers behind the playback pump.
+   * `requestFrame(cb)` schedules a single `cb` invocation and returns a handle;
+   * `cancelFrame(id)` cancels it. Defaults to requestAnimationFrame in browsers,
+   * falling back to setInterval (30ms) in non-browser runtimes.
+   */
+  pump?: { requestFrame?: (cb: () => void) => number; cancelFrame?: (id: number) => void };
 }
 
 export interface PlayerEvents {

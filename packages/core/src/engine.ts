@@ -15,14 +15,13 @@ import { TransportPipeline } from './transport-pipeline.js';
 import { Emitter } from './events.js';
 import { mediaError } from './errors.js';
 import { asMediaError, schemeOf } from './plugin-utils.js';
+import { Pump } from './pump.js';
 import type { Player, PlayerEvents, PlayerOptions, PlayerState, PlayerStats } from './types.js';
 
-const PUMP_INTERVAL_MS = 30;
-
 /**
- * Internal orchestrator: resolves plugins, then drives either the
- * transport → demuxer pipeline or a source plugin pipeline, and owns the
- * scheduler pump. v0.1/v0.2 use a setInterval pump; rAF is a later step.
+ * Orchestrator: resolves plugins, drives either the transport → demuxer
+ * pipeline or a source plugin pipeline, and owns the scheduler pump
+ * (rAF in browsers, interval fallback elsewhere).
  */
 export class Engine implements Player {
   private readonly options: PlayerOptions;
@@ -30,10 +29,10 @@ export class Engine implements Player {
   private readonly emitter = new Emitter<PlayerEvents>();
   private readonly decoder: VideoCodecDecoder;
   private readonly scheduler: Scheduler;
+  private readonly pump: Pump;
   private readonly errors: MediaErrorInfo[] = [];
   private readonly pipeline: TransportPipeline;
   private readonly sourceBranch = new SourceBranch();
-  private pumpId: ReturnType<typeof setInterval> | null = null;
   private state: PlayerState = 'idle';
   private destroyed = false;
   private pluginsRegistered = false;
@@ -51,6 +50,7 @@ export class Engine implements Player {
       onFrame: (frame, ptsUs) => this.emitter.emit('frame', { frame, ptsUs }),
       onError: (info) => this.handleError(info),
     });
+    this.pump = new Pump(() => this.scheduler.tick(), { drivers: options.pump });
     this.pipeline = new TransportPipeline({
       demuxerEvent: (event) => this.handleDemuxerEvent(event),
       onOpen: () => {
@@ -81,8 +81,7 @@ export class Engine implements Player {
     if (this.state !== 'playing' && this.state !== 'connecting') {
       return;
     }
-    // Minimal v0.2 behavior: pause stops the pump and state only. The source
-    // keeps fetching/buffering (e.g. HLS) and resume is not yet in scope.
+    // v0.2: pause stops the pump and state only; the source keeps buffering.
     this.stopPump();
     this.setState('paused');
   }
@@ -93,6 +92,7 @@ export class Engine implements Player {
     }
     this.destroyed = true;
     this.stopPump();
+    this.pump.destroy();
     this.pipeline.teardown();
     this.sourceBranch.disconnect();
     this.decoder.close();
@@ -184,11 +184,7 @@ export class Engine implements Player {
   }
 
   private resolveSourcePlugin(scheme: string): SourcePlugin | undefined {
-    const byDemuxer = this.registry.getSource(this.options.demuxer);
-    if (byDemuxer !== undefined) {
-      return byDemuxer;
-    }
-    return this.registry.getSource(scheme);
+    return this.registry.getSource(this.options.demuxer) ?? this.registry.getSource(scheme);
   }
 
   /** A transport 'close': connect failure while connecting, clean stop otherwise. */
@@ -242,19 +238,11 @@ export class Engine implements Player {
   }
 
   private startPump(): void {
-    if (this.pumpId !== null) {
-      return;
-    }
-    this.pumpId = setInterval(() => {
-      this.scheduler.tick();
-      this.emitter.emit('stats', this.getStats());
-    }, PUMP_INTERVAL_MS);
+    this.pump.start();
+    this.options.renderer?.resize();
   }
 
   private stopPump(): void {
-    if (this.pumpId !== null) {
-      clearInterval(this.pumpId);
-      this.pumpId = null;
-    }
+    this.pump.stop();
   }
 }

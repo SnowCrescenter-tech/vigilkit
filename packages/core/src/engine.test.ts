@@ -12,10 +12,14 @@ import {
   makeSourcePlugin,
 } from './engine-test-fixtures.js';
 import type { Demuxer, MediaErrorInfo, Plugin, SourceOptions, SourcePlugin, Transport } from '@vigilkit/plugin-sdk';
-import type { RendererSurface } from './types.js';
+import type { PlayerOptions, RendererSurface } from './types.js';
 
 /** Transport-path harness: a ManualTransport + a DataDemuxer behind plugins. */
-function makeDemuxerPipeline(transport: Transport, renderer: RendererSurface = fakeRenderer()): {
+function makeDemuxerPipeline(
+  transport: Transport,
+  renderer: RendererSurface = fakeRenderer(),
+  pump?: PlayerOptions['pump'],
+): {
   player: ReturnType<typeof createPlayer>;
   demuxer: () => Demuxer | null;
 } {  const holder: { demuxer: Demuxer | null } = { demuxer: null };
@@ -40,6 +44,7 @@ function makeDemuxerPipeline(transport: Transport, renderer: RendererSurface = f
     demuxer: 'flv',
     plugins: [transportPlugin, demuxerPlugin],
     renderer,
+    pump,
   });
   return { player, demuxer: () => holder.demuxer };
 }
@@ -482,5 +487,80 @@ describe('Engine transport pipeline', () => {
     vi.advanceTimersByTime(10_000);
     expect(errors).toHaveLength(0);
     expect(player.getStats().state).toBe('stopped');
+  });
+});
+
+describe('Engine pump', () => {
+  beforeEach(() => {
+    FakeVideoDecoder.resetInstances();
+    vi.useFakeTimers();
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder);
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('ticks via an injected one-shot rAF driver (one request per tick)', () => {
+    const src = makeSourcePlugin();
+    const renderer = fakeRenderer();
+    const pending = new Map<number, () => void>();
+    let nextId = 1;
+    const fireNext = (): void => {
+      const entry = pending.entries().next();
+      if (entry.done) {
+        return;
+      }
+      const [id, cb] = entry.value;
+      pending.delete(id);
+      cb();
+    };
+    const player = createPlayer({
+      url: 'hls://host/stream.m3u8',
+      demuxer: 'hls',
+      plugins: [src.plugin],
+      renderer,
+      pump: {
+        requestFrame: (cb) => {
+          const id = nextId++;
+          pending.set(id, cb);
+          return id;
+        },
+        cancelFrame: (id) => pending.delete(id),
+      },
+    });
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    expect(pending.size).toBe(1); // the pump requested its first frame
+    fireNext();
+    expect(pending.size).toBe(1); // re-armed after the tick
+    expect(frames).toHaveLength(1);
+    expect(renderer.draw).toHaveBeenCalled();
+    player.destroy();
+    expect(pending.size).toBe(0); // stop canceled the pending request
+  });
+
+  it('interval-style pump drivers keep the pipeline draining under fake timers', () => {
+    const transport = new ManualTransport();
+    const renderer = fakeRenderer();
+    const { player } = makeDemuxerPipeline(transport, renderer, {
+      requestFrame: (cb) => setTimeout(cb, 30),
+      cancelFrame: (id) => clearTimeout(id),
+    });
+    const frames: { frame: VideoFrame; ptsUs: number }[] = [];
+    player.on('frame', (e) => frames.push(e));
+    player.play();
+    transport.emitOpen();
+    transport.emitData(new Uint8Array([1]));
+    vi.advanceTimersByTime(29);
+    expect(frames).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(frames).toHaveLength(1);
+    transport.emitData(new Uint8Array([2]));
+    vi.advanceTimersByTime(30);
+    expect(frames).toHaveLength(2);
   });
 });
