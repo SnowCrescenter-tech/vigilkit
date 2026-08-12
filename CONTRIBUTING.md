@@ -14,6 +14,7 @@ packages/
     ws/            @vigilkit/plugin-ws (transport)
     hls/           @vigilkit/plugin-hls (source plugin: m3u8 + MPEG-TS)
     hevc-wasm/     @vigilkit/plugin-hevc-wasm (libde265 soft-decoder adapter)
+    whep/          @vigilkit/plugin-whep (WHEP WebRTC egress source plugin)
   renderer/        @vigilkit/renderer (WebGPU + WebGL2 + Canvas2D surfaces)
 examples/
   basic/           @vigilkit/example-basic (private example app + e2e fixtures)
@@ -62,7 +63,7 @@ If you are unsure whether a plugin falls on the community side, ask in the issue
 
 ## Adding a transport, demuxer, or source plugin
 
-A plugin is a plain object that satisfies the contract in `@vigilkit/plugin-sdk`. The engine never imports plugin code directly; it resolves plugins through the registry at runtime. Transport and demuxer plugins existed in v0.1; source plugins arrived in v0.2 and are the recommended shape for whole-container formats like HLS.
+A plugin is a plain object that satisfies the contract in `@vigilkit/plugin-sdk`. The engine never imports plugin code directly; it resolves plugins through the registry at runtime. Transport and demuxer plugins existed in v0.1; source plugins arrived in v0.2 and are the recommended shape for whole-container formats like HLS, with WHEP (v0.3) as the direct-frame variant.
 
 ### Transport plugin
 
@@ -95,7 +96,9 @@ export interface DemuxerPlugin {
 }
 ```
 
-`Demuxer` is `push(chunk)`, `flush()`, `onEvent(listener)`, and `close()`. A demuxer parses container bytes and emits demuxer events: `metadata`, `sequence-header` (a `VideoDecoderConfig`), `video` / `audio` chunks, and `error`.
+`Demuxer` is `push(chunk)`, `flush()`, `onEvent(listener)`, and `close()`. A demuxer parses container bytes and emits demuxer events: `metadata`, `sequence-header` (a `VideoDecoderConfig`), `audio-config` (an `AudioDecoderConfig`), `video` / `audio` chunks, `frame` (a direct decoded `VideoFrame`), and `error`.
+
+**Audio-config emission:** a demuxer that carries audio must emit `audio-config` once, before its first `audio` chunk, so the engine can configure its WebCodecs `AudioDecoder`. Audio chunks carry the raw encoded payload with no container framing. FLV is the reference: it emits the AAC AudioSpecificConfig from the AAC sequence header and passes AAC RAW packets through unchanged. HLS derives the config from the first ADTS frame and strips the ADTS headers from the payload (see `packages/plugins/hls/src/ts/ts-demuxer.ts`).
 
 Reference implementation: `packages/plugins/flv/` (`flv-demuxer.ts` + `plugin.ts`).
 
@@ -121,15 +124,22 @@ export interface MediaSource {
 }
 ```
 
-`MediaSource` emits the same event union as a `Demuxer` (`metadata`, `sequence-header`, `video` / `audio` chunks, `error`), so the engine treats it uniformly once the source branch resolves the URL scheme. The engine calls `create(url, sourceOptions)` when a matching plugin claims the URL scheme, then `start()` on play and `stop()` on teardown. `SourceOptions.variant` selects HLS ABR variant (`'lowest' | 'highest' | number`, default `'lowest'`).
+`MediaSource` emits the same event union as a `Demuxer` (`metadata`, `sequence-header`, `audio-config`, `video` / `audio` chunks, `frame`, `error`), so the engine treats it uniformly once the source branch resolves the URL scheme. The engine calls `create(url, sourceOptions)` when a matching plugin claims the URL scheme, then `start()` on play and `stop()` on teardown. `SourceOptions.variant` selects HLS ABR variant (`'lowest' | 'highest' | number`, default `'lowest'`).
 
 Reference implementation: `packages/plugins/hls/` (m3u8 parser + MPEG-TS demuxer + `hls-source.ts` + `plugin.ts`). Note how it builds on `@vigilkit/media-utils` for byte reading and NALU handling rather than re-implementing them.
+
+**Direct-frame sources (the WHEP pattern):** a source plugin that receives already-decoded media can emit `{ type: 'frame', frame }` events instead of encoded chunks. The `frame` event bypasses the encoded decode chain entirely: no `sequence-header`, no codec routing, no jitter-buffer scheduling. The engine counts each frame like a scheduler-decoded frame, hands it to the renderer (which takes ownership), and closes it itself when no renderer is attached. Ownership rules for the emitting source:
+
+- Never close a frame after dispatching it to the engine.
+- Close any frame read after `stop()` instead of dispatching it (the engine owns every frame it was handed).
+
+Reference implementation: `packages/plugins/whep/` (`whep-source.ts` + `whep-sdp.ts` + `plugin.ts`). It POSTs an SDP offer to a WHEP resource URL, adopts the server's answer (or answers a 406 counter-offer via PATCH), trickles ICE candidates over PATCH, and reads decoded `VideoFrame`s from a `MediaStreamTrackProcessor`. Note that it claims no URL schemes: WHEP resource URLs are plain `http(s)` endpoints that already belong to the HLS source, so the engine resolves the plugin by source id (`demuxer: 'whep'`) instead.
 
 ### Steps
 
 1. **Open an issue** proposing the plugin (schemes, mime types, format support scope). This catches registry collisions early: the registry rejects a plugin whose `id`, `scheme`, or `mimeType` is already claimed, raising `PluginCollisionError`.
-2. **Scaffold** `packages/plugins/<name>/` mirroring the WS, FLV, or HLS package: `package.json` (name `@vigilkit/plugin-<name>`, Apache-2.0, only workspace deps), `tsconfig.json`, `src/` split into files under 250 lines, and a factory function `<name>Plugin()`. For demuxers and source plugins, depend on `@vigilkit/media-utils` for byte-reader / NALU / AVC helpers instead of hand-rolling them.
-3. **Write tests first** (TDD): unit tests for the parser and for the plugin contract. For demuxers, feed real container bytes; the committed FLV fixture under `examples/basic/fixtures/` is a convenient source. For soft-decoder adapters, the HEVC plugin's Node smoke test (`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`) decodes a real fixture end to end.
+2. **Scaffold** `packages/plugins/<name>/` mirroring the WS, FLV, HLS, or WHEP package: `package.json` (name `@vigilkit/plugin-<name>`, Apache-2.0, only workspace deps), `tsconfig.json`, `src/` split into files under 250 lines, and a factory function `<name>Plugin()`. For demuxers and source plugins, depend on `@vigilkit/media-utils` for byte-reader / NALU / AVC helpers instead of hand-rolling them. Mirror WHEP when your source hands out already-decoded frames, HLS when it self-fetches an encoded container.
+3. **Write tests first** (TDD): unit tests for the parser and for the plugin contract. For demuxers, feed real container bytes; the committed FLV fixture under `examples/basic/fixtures/` is a convenient source. Assert the `audio-config` ordering explicitly (it must precede the first `audio` chunk). For soft-decoder adapters, the HEVC plugin's Node smoke test (`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`) decodes a real fixture end to end.
 4. **Implement** until the tests pass. Keep the contract types from `@vigilkit/plugin-sdk`, do not redefine them.
 5. **Wire up an example** (optional but appreciated): register the plugin in `examples/basic/src/main.ts` so the e2e surface can grow.
 6. **Verify**: `pnpm lint`, `pnpm -r typecheck`, `pnpm -r test`, and `node scripts/check-licenses.mjs --ci` all clean.
