@@ -1,9 +1,33 @@
 import { hlsError } from '../errors.js';
-import type { Playlist, Segment, Variant } from './types.js';
+import type { KeyInfo, Playlist, Segment, Variant } from './types.js';
 
 interface PendingVariant {
   bandwidth?: number;
   resolution?: { width: number; height: number };
+}
+
+const IV_PATTERN = /^0x[0-9a-fA-F]{32}$/;
+
+/**
+ * Parses the `#EXT-X-KEY` attribute list (RFC 8216 §5.2). Returns the key to
+ * apply to subsequent segments, or `undefined` when no key applies. Per spec
+ * an unrecognized METHOD is ignored; since the plugin only implements
+ * AES-128, any METHOD other than AES-128 — including NONE — disables
+ * encryption, and a tag that cannot yield a valid AES-128 key (missing URI,
+ * malformed IV) is treated the same way rather than guessing at an algorithm
+ * or silently playing garbage ciphertext.
+ */
+function parseKeyInfo(text: string): KeyInfo | undefined {
+  const attrs = parseAttributes(text);
+  const method = (attrs.get('METHOD') ?? '').toUpperCase();
+  if (method !== 'AES-128') return undefined;
+  const uri = attrs.get('URI');
+  if (uri === undefined || uri.length === 0) return undefined;
+  const iv = attrs.get('IV');
+  if (iv !== undefined && !IV_PATTERN.test(iv)) return undefined;
+  const key: KeyInfo = { method: 'AES-128', uri };
+  if (iv !== undefined) key.iv = iv;
+  return key;
 }
 
 /** Parses `RESOLUTION=WxH` attribute values. */
@@ -62,6 +86,7 @@ export function parseM3u8(text: string): Playlist {
   let pendingByterange: { length: number; offset: number } | undefined;
   let pendingVariant: PendingVariant | null = null;
   let lastByterangeEnd: number | undefined;
+  let currentKey: KeyInfo | undefined;
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -101,6 +126,8 @@ export function parseM3u8(text: string): Playlist {
         endList = true;
       } else if (line.startsWith('#EXT-X-VERSION:')) {
         version = toOptionalNumber(line.slice('#EXT-X-VERSION:'.length));
+      } else if (line.startsWith('#EXT-X-KEY:')) {
+        currentKey = parseKeyInfo(line.slice('#EXT-X-KEY:'.length));
       }
       // Any other #EXT-X-* tag is ignored.
       continue;
@@ -119,6 +146,7 @@ export function parseM3u8(text: string): Playlist {
         segment.byterange = pendingByterange;
         pendingByterange = undefined;
       }
+      if (currentKey !== undefined) segment.key = currentKey;
       segments.push(segment);
       pendingDuration = null;
     }

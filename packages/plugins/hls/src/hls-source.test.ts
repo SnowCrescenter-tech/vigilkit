@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { DemuxerEvent, MediaSource } from '@vigilkit/plugin-sdk';
+import type { Bytes } from './aes-cbc.js';
 import { HlsSource } from './hls-source.js';
+import { TsDemuxer } from './ts/ts-demuxer.js';
 
 const SPS = new Uint8Array([0x67, 0x42, 0x00, 0x1f, 0x95, 0xa8, 0x14, 0x01, 0x6e, 0x90]);
 const PPS = new Uint8Array([0x68, 0xce, 0x06, 0xe2]);
 const IDR = new Uint8Array([0x65, 0x88, 0x84, 0x00, 0x00]);
 
-function concat(...parts: Uint8Array[]): Uint8Array {
+function concat(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const total = parts.reduce((sum, p) => sum + p.length, 0);
   const out = new Uint8Array(total);
   let off = 0;
@@ -52,7 +54,7 @@ function annexBNalu(nalu: Uint8Array): Uint8Array {
   return concat(new Uint8Array([0, 0, 0, 1]), nalu);
 }
 
-function buildSegment(): Uint8Array {
+function buildSegment(): Uint8Array<ArrayBuffer> {
   const videoPid = 0x101;
   const pmtPid = 0x100;
   const pes = new Uint8Array(9 + 5 + 13 + 5 + 4 + 5);
@@ -121,6 +123,29 @@ seg-0.ts
 `;
 
 const SEGMENT = buildSegment();
+
+/** Hex-encodes bytes for a playlist IV attribute. */
+function toHex(bytes: Bytes): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Encrypts a TS segment with AES-128-CBC for the fixture (real WebCrypto). */
+async function encryptSegment(keyBytes: Bytes, iv: Bytes, plaintext: Bytes): Promise<Bytes> {
+  const encryptKey = await globalThis.crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, ['encrypt']);
+  return new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: 'AES-CBC', iv }, encryptKey, plaintext));
+}
+
+/** Demuxes bytes directly and returns the emitted video chunks. */
+function videoChunksFrom(bytes: Bytes): Uint8Array[] {
+  const demuxer = new TsDemuxer();
+  const chunks: Uint8Array[] = [];
+  demuxer.onEvent((event) => {
+    if (event.type === 'video') chunks.push(event.chunk.data);
+  });
+  demuxer.push(bytes);
+  demuxer.flush();
+  return chunks;
+}
 
 function buildRoutes(): (url: string, init?: RequestInit) => { ok: boolean; text?: string; arrayBuffer?: Uint8Array } {
   const calls: string[] = [];
@@ -274,5 +299,306 @@ seg-0.ts
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(seen['range']).toBe('bytes=0-999');
     source.stop();
+  });
+
+  describe('AES-128 encryption', () => {
+    const KEYED_MEDIA = (ivAttr: string): string => `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-KEY:METHOD=AES-128,URI="key.bin",IV=${ivAttr}
+#EXTINF:2.0,
+seg-0.ts
+#EXT-X-ENDLIST
+`;
+
+    it('decrypts an AES-128 segment and demuxes the plaintext bytes', async () => {
+      const keyBytes = new Uint8Array(16);
+      crypto.getRandomValues(keyBytes);
+      const iv = new Uint8Array(16);
+      iv[0] = 0x01;
+      const encrypted = await encryptSegment(keyBytes, iv, SEGMENT);
+      let keyFetches = 0;
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) return { ok: true, text: KEYED_MEDIA(`0x${toHex(iv)}`) };
+        if (url.endsWith('key.bin')) {
+          keyFetches++;
+          return { ok: true, arrayBuffer: keyBytes };
+        }
+        if (url.endsWith('seg-0.ts')) return { ok: true, arrayBuffer: encrypted };
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', { fetchImpl, reloadIntervalMs: 5000 });
+      const events = collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      const videos = events.filter((event) => event.type === 'video');
+      expect(videos.length).toBeGreaterThan(0);
+      // Bytes round-trip: the decrypted stream yields exactly the video chunk
+      // the plaintext TS yields when fed to a demuxer directly.
+      const decrypted = videos[0]?.type === 'video' ? videos[0].chunk.data : null;
+      const control = videoChunksFrom(SEGMENT);
+      expect(decrypted).toEqual(control[0]);
+      expect(keyFetches).toBe(1);
+      expect(events.filter((event) => event.type === 'error')).toHaveLength(0);
+      source.stop();
+    });
+
+    it('derives the IV from the media sequence when the playlist omits IV', async () => {
+      const keyBytes = new Uint8Array(16);
+      crypto.getRandomValues(keyBytes);
+      const iv = new Uint8Array(16); // media sequence 0 → 128-bit BE zero
+      const encrypted = await encryptSegment(keyBytes, iv, SEGMENT);
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) {
+          return { ok: true, text: `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-KEY:METHOD=AES-128,URI="key.bin"
+#EXTINF:2.0,
+seg-0.ts
+#EXT-X-ENDLIST
+` };
+        }
+        if (url.endsWith('key.bin')) return { ok: true, arrayBuffer: keyBytes };
+        if (url.endsWith('seg-0.ts')) return { ok: true, arrayBuffer: encrypted };
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', { fetchImpl, reloadIntervalMs: 5000 });
+      const events = collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      const videos = events.filter((event) => event.type === 'video');
+      expect(videos.length).toBeGreaterThan(0);
+      const decrypted = videos[0]?.type === 'video' ? videos[0].chunk.data : null;
+      expect(decrypted).toEqual(videoChunksFrom(SEGMENT)[0]);
+      expect(events.filter((event) => event.type === 'error')).toHaveLength(0);
+      source.stop();
+    });
+
+    it('fetches a shared key once for multiple encrypted segments', async () => {
+      const keyBytes = new Uint8Array(16);
+      crypto.getRandomValues(keyBytes);
+      const iv = new Uint8Array(16);
+      const encrypted = await encryptSegment(keyBytes, iv, SEGMENT);
+      let keyFetches = 0;
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) {
+          return { ok: true, text: `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-KEY:METHOD=AES-128,URI="key.bin"
+#EXTINF:2.0,
+seg-0.ts
+#EXTINF:2.0,
+seg-1.ts
+#EXT-X-ENDLIST
+` };
+        }
+        if (url.endsWith('key.bin')) {
+          keyFetches++;
+          return { ok: true, arrayBuffer: keyBytes };
+        }
+        if (url.endsWith('seg-0.ts') || url.endsWith('seg-1.ts')) return { ok: true, arrayBuffer: encrypted };
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', { fetchImpl, reloadIntervalMs: 5000 });
+      const events = collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      const videos = events.filter((event) => event.type === 'video');
+      expect(videos.length).toBeGreaterThanOrEqual(2);
+      expect(keyFetches).toBe(1);
+      expect(events.filter((event) => event.type === 'error')).toHaveLength(0);
+      source.stop();
+    });
+
+    it('surfaces a DEMUX error and stops when the key fetch fails', async () => {
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) return { ok: true, text: KEYED_MEDIA('0x00000000000000000000000000000000') };
+        if (url.endsWith('key.bin')) return { ok: false };
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', { fetchImpl, reloadIntervalMs: 5000 });
+      const events = collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      const errors = events.filter((event) => event.type === 'error');
+      expect(errors).toHaveLength(1);
+      const error = errors[0];
+      expect(error && error.type === 'error' ? error.error.code : '').toBe('DEMUX');
+      expect(events.filter((event) => event.type === 'video')).toHaveLength(0);
+      source.stop();
+    });
+
+    it('surfaces a DEMUX error when decryption fails (wrong key)', async () => {
+      const keyBytes = new Uint8Array(16);
+      crypto.getRandomValues(keyBytes);
+      const iv = new Uint8Array(16);
+      const encrypted = await encryptSegment(keyBytes, iv, SEGMENT);
+      const wrongKey = new Uint8Array(16).fill(0xab);
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) return { ok: true, text: KEYED_MEDIA('0x00000000000000000000000000000000') };
+        if (url.endsWith('key.bin')) return { ok: true, arrayBuffer: wrongKey };
+        if (url.endsWith('seg-0.ts')) return { ok: true, arrayBuffer: encrypted };
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', { fetchImpl, reloadIntervalMs: 5000 });
+      const events = collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      const errors = events.filter((event) => event.type === 'error');
+      expect(errors).toHaveLength(1);
+      const error = errors[0];
+      expect(error && error.type === 'error' ? error.error.message : '').toContain('AES-128');
+      expect(events.filter((event) => event.type === 'video')).toHaveLength(0);
+      source.stop();
+    });
+  });
+
+  describe('live segment window', () => {
+    it('skips segments beyond maxBufferedSegments in a live pass', async () => {
+      let segFetches = 0;
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) {
+          return { ok: true, text: `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:2.0,
+seg-0.ts
+#EXTINF:2.0,
+seg-1.ts
+#EXTINF:2.0,
+seg-2.ts
+#EXTINF:2.0,
+seg-3.ts
+#EXTINF:2.0,
+seg-4.ts
+` };
+        }
+        if (/seg-\d\.ts$/.test(url)) {
+          segFetches++;
+          return { ok: true, arrayBuffer: SEGMENT };
+        }
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', {
+        fetchImpl,
+        reloadIntervalMs: 5000,
+        maxBufferedSegments: 2,
+      });
+      collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      // Only the first 2 segments are within the window; the tail waits for a
+      // reload instead of being fetched in one unbounded pass.
+      expect(segFetches).toBe(2);
+      source.stop();
+    });
+
+    it('does not apply the window to VOD playlists (every segment plays)', async () => {
+      let segFetches = 0;
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) {
+          return { ok: true, text: `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:2.0,
+seg-0.ts
+#EXTINF:2.0,
+seg-1.ts
+#EXTINF:2.0,
+seg-2.ts
+#EXTINF:2.0,
+seg-3.ts
+#EXT-X-ENDLIST
+` };
+        }
+        if (/seg-\d\.ts$/.test(url)) {
+          segFetches++;
+          return { ok: true, arrayBuffer: SEGMENT };
+        }
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', {
+        fetchImpl,
+        reloadIntervalMs: 5000,
+        maxBufferedSegments: 2,
+      });
+      collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      expect(segFetches).toBe(4);
+      source.stop();
+    });
+
+    it('continues from the sliding media sequence without re-fetching old segments', async () => {
+      let playlistVersion = 0;
+      let segFetches = 0;
+      const fetchImpl = mockFetch((url) => {
+        if (url.endsWith('master.m3u8')) return { ok: true, text: MASTER };
+        if (url.endsWith('low.m3u8')) {
+          playlistVersion++;
+          if (playlistVersion === 1) {
+            return { ok: true, text: `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:2.0,
+seg-0.ts
+#EXTINF:2.0,
+seg-1.ts
+#EXTINF:2.0,
+seg-2.ts
+#EXTINF:2.0,
+seg-3.ts
+` };
+          }
+          return { ok: true, text: `#EXTM3U
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:2
+#EXTINF:2.0,
+seg-2.ts
+#EXTINF:2.0,
+seg-3.ts
+#EXTINF:2.0,
+seg-4.ts
+#EXTINF:2.0,
+seg-5.ts
+` };
+        }
+        if (/seg-\d\.ts$/.test(url)) {
+          segFetches++;
+          return { ok: true, arrayBuffer: SEGMENT };
+        }
+        return { ok: false };
+      });
+      const source = new HlsSource('http://localhost/hls/master.m3u8', {
+        fetchImpl,
+        reloadIntervalMs: 15,
+        maxBufferedSegments: 10,
+      });
+      collect(source);
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // First pass fetched seg-0..seg-3 (4). After the slide to mediaSequence
+      // 2, the overlapping seg-2/seg-3 are deduped (not re-fetched) and only
+      // seg-4/seg-5 are new: 6 segment fetches total, never more.
+      expect(segFetches).toBe(6);
+      source.stop();
+    });
   });
 });
