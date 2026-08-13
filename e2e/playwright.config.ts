@@ -5,6 +5,12 @@ export default defineConfig({
   testMatch: '**/*.spec.ts',
   timeout: 60000,
   outputDir: 'artifacts',
+  // Bounded parallelism: the HEVC specs soft-decode 200+ KB keyframes with
+  // libde265 WASM on their pages' main threads. At the default worker count
+  // (cores/2) the resulting CPU contention starved the WS-FLV spec's pump
+  // past the engine's 10 s fatal-stall watchdog (observed: STALLED errors),
+  // so cap the suite at two concurrent pages.
+  workers: 2,
   use: { headless: true, viewport: { width: 960, height: 640 } },
   // Two projects: chromium (baseline) and firefox. Each spec reads
   // testInfo.project.name ('chromium' | 'firefox') to apply project-aware

@@ -17,7 +17,18 @@ FFmpeg FATE MPEG-TS stream, sha256-pinned, used by the vigilkit HLS transport/de
   video pid 0x101) + 10 PES access units (VPS/SPS/PPS + the leading IRAP in the
   first PES, PTS = frameIndex * 90000 / 30). Exercise it with
   `node scripts/generate-hevc-fixtures.mjs --verify-ts`.
-- `hevc.m3u8` — VOD media playlist, 10 segments of `hevc-seg-0.ts` (TARGETDURATION 1.0s)
+- `hevc-seg-1.ts` … `hevc-seg-9.ts` — byte-identical copies of `hevc-seg-0.ts`
+  except (a) the video-PID (0x101) payload-packet continuity counters, shifted
+  by 5k mod 16 for copy k — the unshifted segment's 3221 video payload packets
+  run counters 2…6 (not a multiple of 16, so the file cannot cycle by itself)
+  and the per-copy shift closes the boundary delta, letting one `TsDemuxer`
+  ingest 10 consecutive copies without a continuity-counter gap — and (b) the
+  PES PTS fields, advanced by 2 s per copy. The engine's scheduler drops
+  chunks more than 1 s late, and the segment's tiny PTS deltas (~33 ms/frame)
+  would otherwise make the whole 10-segment stream span only ~3.3 s while
+  soft decode takes ~8 s.
+- `hevc.m3u8` — VOD media playlist, 10 segments `hevc-seg-0.ts`…`hevc-seg-9.ts`
+  (TARGETDURATION 1.0s)
 
 Purpose: deterministic local HLS fixture for e2e browser QA and plugin unit tests, without depending on a network HLS server.
 
