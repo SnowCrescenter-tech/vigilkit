@@ -5,11 +5,19 @@ import { DECODER_HIGH_WATER } from './decoder.js';
 import type { VideoCodecDecoder } from './decoder.js';
 import type { RendererSurface } from './types.js';
 import { mediaError } from './errors.js';
+import { StallMonitor } from './qos.js';
+import { drawOrClose } from './render-surface.js';
+
+const STALL_THRESHOLD_MS = 1500;
+const FATAL_STALL_MS = 10_000;
 
 export interface SchedulerStats {
   framesDecoded: number;
   framesDropped: number;
   fps: number;
+  stalledCount: number;
+  rebufferMs: number;
+  currentBufferMs: number;
 }
 
 export interface SchedulerOptions {
@@ -17,13 +25,23 @@ export interface SchedulerOptions {
   now?: () => number;
   onFrame?: (frame: VideoFrame, ptsUs: number) => void;
   onError?: (info: MediaErrorInfo) => void;
+  /** No data for this long (ms) declares a stall episode. Default 1500. */
+  stallThresholdMs?: number;
+  /** A stall episode longer than this (ms) is fatal. Default 10000. */
+  fatalStallMs?: number;
+  /** Fired once per stall episode, at the tick the episode begins. */
+  onStalled?: () => void;
+  /** Fired once when a stall episode exceeds fatalStallMs. */
+  onFatalStall?: (info: MediaErrorInfo) => void;
 }
 
 /**
  * Wires the jitter buffer -> decoder -> renderer pipeline. `tick()` is driven
  * by the engine's pump. Drop-late policy: chunks whose PTS is older than
  * `latencyBudgetMs` is discarded. Backpressure: nothing is pulled from the
- * jitter buffer while the decoder is at the high-water mark.
+ * jitter buffer while the decoder is at the high-water mark. A stall watchdog
+ * (QoS) declares an episode when both the jitter buffer and the decoder queue
+ * sit empty past `stallThresholdMs`.
  */
 export class Scheduler {
   private readonly decoder: VideoCodecDecoder;
@@ -33,6 +51,11 @@ export class Scheduler {
   private readonly latencyBudgetMs: number;
   private readonly onFrame: ((frame: VideoFrame, ptsUs: number) => void) | undefined;
   private readonly onError: ((info: MediaErrorInfo) => void) | undefined;
+  private readonly onStalled: (() => void) | undefined;
+  private readonly onFatalStall: ((info: MediaErrorInfo) => void) | undefined;
+  private readonly stallThresholdMs: number;
+  private readonly fatalStallMs: number;
+  private readonly stallMonitor: StallMonitor;
   private readonly now: () => number;
   private clockReset = false;
   private framesDecoded = 0;
@@ -49,8 +72,16 @@ export class Scheduler {
     this.latencyBudgetMs = options.latencyBudgetMs ?? 1000;
     this.onFrame = options.onFrame;
     this.onError = options.onError;
+    this.onStalled = options.onStalled;
+    this.onFatalStall = options.onFatalStall;
+    this.stallThresholdMs = options.stallThresholdMs ?? STALL_THRESHOLD_MS;
+    this.fatalStallMs = options.fatalStallMs ?? FATAL_STALL_MS;
     this.now = options.now ?? (() => performance.now());
     this.clock = new AvSyncClock(this.now);
+    this.stallMonitor = new StallMonitor({
+      stallThresholdMs: this.stallThresholdMs,
+      fatalStallMs: this.fatalStallMs,
+    });
     decoder.onOutput((frame, ptsUs) => this.handleOutput(frame, ptsUs));
   }
 
@@ -60,6 +91,7 @@ export class Scheduler {
       this.clockReset = true;
     }
     this.jitter.push(chunk);
+    this.stallMonitor.noteData(this.now());
   }
 
   /**
@@ -85,15 +117,14 @@ export class Scheduler {
       this.jitter.next();
       this.framesDropped++;
     }
-    if (this.decoder.queueSize >= DECODER_HIGH_WATER) {
-      return;
+    if (this.decoder.queueSize < DECODER_HIGH_WATER) {
+      const head = this.jitter.peek();
+      if (head !== undefined) {
+        this.jitter.next();
+        this.decoder.decode(head);
+      }
     }
-    const head = this.jitter.peek();
-    if (head === undefined) {
-      return;
-    }
-    this.jitter.next();
-    this.decoder.decode(head);
+    this.watchStall(nowMs);
   }
 
   getStats(): SchedulerStats {
@@ -101,26 +132,41 @@ export class Scheduler {
       framesDecoded: this.framesDecoded,
       framesDropped: this.framesDropped,
       fps: this.decodeTimes.length,
+      stalledCount: this.stallMonitor.stalledCount,
+      rebufferMs: this.stallMonitor.rebufferMs,
+      currentBufferMs: this.bufferedMs(),
     };
+  }
+
+  private bufferedMs(): number {
+    const head = this.jitter.peek();
+    const tail = this.jitter.tail();
+    if (head === undefined || tail === undefined) {
+      return 0;
+    }
+    return Math.max(0, (tail.timestamp - head.timestamp) / 1000);
+  }
+
+  private watchStall(nowMs: number): void {
+    const hasData = this.jitter.peek() !== undefined || this.decoder.idle === false;
+    const result = this.stallMonitor.onTick(hasData, nowMs);
+    if (result === undefined) {
+      return;
+    }
+    if (result.started) {
+      this.onStalled?.();
+    }
+    if (result.fatal) {
+      this.onFatalStall?.(mediaError('STALLED', `playback stalled for > ${this.fatalStallMs} ms`));
+    }
   }
 
   private handleOutput(frame: VideoFrame, ptsUs: number): void {
     this.framesDecoded++;
     this.recordDecode();
+    this.stallMonitor.noteData(this.now());
     this.onFrame?.(frame, ptsUs);
-    if (this.renderer !== null) {
-      try {
-        this.renderer.draw(frame);
-      } catch (error) {
-        // A throwing renderer must not escape the pump: surface it as a
-        // RENDERER error. The frame is the renderer's responsibility once
-        // draw() is handed it (its own finally closes it).
-        const message = error instanceof Error ? error.message : 'renderer draw failed';
-        this.onError?.(mediaError('RENDERER', message));
-      }
-    } else {
-      frame.close();
-    }
+    drawOrClose(this.renderer, frame, (info) => this.onError?.(info));
   }
 
   private recordDecode(): void {

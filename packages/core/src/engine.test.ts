@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createPlayer } from './player.js';
 import { Engine } from './engine.js';
+import { DriftCorrector } from './drift-corrector.js';
+import { Scheduler } from './scheduler.js';
 import { FakeEncodedVideoChunk, FakeVideoDecoder } from './fake-video-decoder.fixture.js';
 import {
   FakeAudioContext,
@@ -20,13 +22,14 @@ import {
   makeSourcePlugin,
 } from './engine-test-fixtures.js';
 import type { Demuxer, DemuxerEvent, MediaErrorInfo, MediaSource, Plugin, SourceOptions, SourcePlugin, Transport } from '@vigilkit/plugin-sdk';
-import type { PlayerOptions, RendererSurface } from './types.js';
+import type { PlayerOptions, PlayerStats, RendererSurface } from './types.js';
 
 /** Transport-path harness: a ManualTransport + a DataDemuxer behind plugins. */
 function makeDemuxerPipeline(
   transport: Transport,
   renderer: RendererSurface = fakeRenderer(),
   pump?: PlayerOptions['pump'],
+  options: { qos?: PlayerOptions['qos'] } = {},
 ): {
   player: ReturnType<typeof createPlayer>;
   demuxer: () => Demuxer | null;
@@ -53,6 +56,7 @@ function makeDemuxerPipeline(
     plugins: [transportPlugin, demuxerPlugin],
     renderer,
     pump,
+    ...options,
   });
   return { player, demuxer: () => holder.demuxer };
 }
@@ -317,7 +321,7 @@ describe('Engine transport pipeline', () => {
     vi.unstubAllGlobals();
   });
 
-  it('a transport that never opens surfaces a TRANSPORT connect-timeout error', () => {
+  it('a transport that never opens surfaces a TIMEOUT connect-timeout error', () => {
     const transport = new ManualTransport();
     const { player } = makeDemuxerPipeline(transport);
     const errors: MediaErrorInfo[] = [];
@@ -326,10 +330,66 @@ describe('Engine transport pipeline', () => {
     expect(player.getStats().state).toBe('connecting');
     vi.advanceTimersByTime(10_000);
     expect(errors).toHaveLength(1);
-    expect(errors[0]?.code).toBe('TRANSPORT');
+    expect(errors[0]?.code).toBe('TIMEOUT');
     expect(errors[0]?.message).toBe('connect timeout');
     expect(player.getStats().state).toBe('error');
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('emits a non-fatal stalled event when playback stalls, keeping the state playing', () => {
+    const transport = new ManualTransport();
+    const { player, demuxer } = makeDemuxerPipeline(transport);
+    const stalled: PlayerStats[] = [];
+    player.on('stalled', (e) => stalled.push(e.stats));
+    player.play();
+    transport.emitOpen();
+    demuxer()!.push(new Uint8Array([1]));
+    vi.advanceTimersByTime(30); // the chunk decodes; last data activity now
+    expect(player.getStats().state).toBe('playing');
+    vi.advanceTimersByTime(2000); // idle past the default 1500ms threshold
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0]?.stalledCount).toBe(1);
+    expect(player.getStats().state).toBe('playing');
+    expect(player.getStats().stalledCount).toBe(1);
+    expect(player.getStats().rebufferMs).toBeGreaterThan(0);
+  });
+
+  it('honors qos.stallThresholdMs instead of the 1500ms default', () => {
+    const transport = new ManualTransport();
+    const { player, demuxer } = makeDemuxerPipeline(transport, fakeRenderer(), undefined, {
+      qos: { stallThresholdMs: 50, fatalStallMs: 10_000 },
+    });
+    const stalled: PlayerStats[] = [];
+    player.on('stalled', (e) => stalled.push(e.stats));
+    player.play();
+    transport.emitOpen();
+    demuxer()!.push(new Uint8Array([1]));
+    vi.advanceTimersByTime(30); // decoded; last data activity at +30
+    vi.advanceTimersByTime(40); // +40 since last data: below the 50ms threshold
+    expect(stalled).toHaveLength(0);
+    vi.advanceTimersByTime(30); // +70 since last data: past the 50ms threshold
+    expect(stalled).toHaveLength(1);
+    expect(player.getStats().stalledCount).toBe(1);
+  });
+
+  it('a stall persisting past qos.fatalStallMs surfaces a STALLED error and tears down', () => {
+    const transport = new ManualTransport();
+    const { player, demuxer } = makeDemuxerPipeline(transport, fakeRenderer(), undefined, {
+      qos: { stallThresholdMs: 100, fatalStallMs: 300 },
+    });
+    const errors: MediaErrorInfo[] = [];
+    player.on('error', (e) => errors.push(e));
+    player.play();
+    transport.emitOpen();
+    demuxer()!.push(new Uint8Array([1]));
+    vi.advanceTimersByTime(30);
+    vi.advanceTimersByTime(1000); // the stall episode outlives fatalStallMs
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.code).toBe('STALLED');
+    expect(errors[0]?.message).toBe('playback stalled for > 300 ms');
+    expect(player.getStats().state).toBe('error');
+    expect(player.getStats().stalledCount).toBe(1);
+    expect(transport.closed).toBe(true);
   });
 
   it('a clean transport close transitions to stopped and stops decoding', () => {
@@ -802,5 +862,131 @@ describe('Engine audio pipeline', () => {
     engine.destroy();
     expect(fake.closed).toBe(true);
     expect(ctx.closeCount).toBe(1);
+  });
+});
+
+describe('Engine A/V drift correction', () => {
+  beforeEach(() => {
+    FakeVideoDecoder.resetInstances();
+    FakeAudioDecoder.resetInstances();
+    FakeAudioContext.resetInstances();
+    vi.useFakeTimers();
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder);
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk);
+    vi.stubGlobal('EncodedAudioChunk', FakeEncodedAudioChunk);
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const AUDIO_CONFIG: AudioDecoderConfig = {
+    codec: 'mp4a.40.2',
+    sampleRate: 48000,
+    numberOfChannels: 2,
+  };
+
+  /** Transport-path harness returning the engine, its manual demuxer and transport. */
+  function makeDriftEngine(): {
+    engine: Engine;
+    demuxer: () => ManualAudioDemuxer | null;
+    transport: ManualTransport;
+  } {
+    const holder: { demuxer: ManualAudioDemuxer | null } = { demuxer: null };
+    const transport = new ManualTransport();
+    const transportPlugin: Plugin = {
+      type: 'transport',
+      id: 'fake-ws',
+      schemes: ['ws', 'wss'],
+      create: () => transport,
+    };
+    const demuxerPlugin: Plugin = {
+      type: 'demuxer',
+      id: 'fake-flv',
+      mimeTypes: ['video/x-flv'],
+      schemes: ['flv'],
+      create: () => {
+        holder.demuxer = new ManualAudioDemuxer();
+        return holder.demuxer;
+      },
+    };
+    const engine = new Engine(
+      {
+        url: 'ws://host/stream',
+        demuxer: 'flv',
+        plugins: [transportPlugin, demuxerPlugin],
+        renderer: fakeRenderer(),
+      },
+      undefined,
+      (handlers) => new FakeAudioDecoder(handlers) as unknown as AudioDecoder,
+    );
+    return { engine, demuxer: () => holder.demuxer, transport };
+  }
+
+  /** Drives the engine into the audio-master state (one scheduled audio buffer). */
+  function activateAudio(engine: Engine, demuxer: () => ManualAudioDemuxer | null, transport: ManualTransport): void {
+    engine.play();
+    transport.emitOpen();
+    demuxer()!.emitAudioConfig(AUDIO_CONFIG);
+    demuxer()!.emitAudio({ type: 'key', timestamp: 1_000_000, data: new Uint8Array([1]) });
+  }
+
+  it('feeds (audio media time, video PTS) samples while audio is the master clock', () => {
+    const observeSpy = vi.spyOn(DriftCorrector.prototype, 'observe');
+    const { engine, demuxer, transport } = makeDriftEngine();
+    activateAudio(engine, demuxer, transport);
+    // Master time = firstPts(1_000_000) + (currentTime(2) - firstWhen(0.25)) * 1e6.
+    FakeAudioContext.instances[0]!.currentTime = 2;
+    demuxer()!.emitSequenceHeader({ codec: 'vp8', codedWidth: 640, codedHeight: 480 });
+    demuxer()!.emitVideo({ type: 'key', timestamp: 2_750_000, data: new Uint8Array([1]) });
+    vi.advanceTimersByTime(30);
+    expect(observeSpy).toHaveBeenCalledWith(2_750_000, 2_750_000);
+  });
+
+  it('resyncs the scheduler once and resets the corrector when |avOffset| exceeds the threshold', () => {
+    const resyncSpy = vi.spyOn(Scheduler.prototype, 'resync');
+    const resetSpy = vi.spyOn(DriftCorrector.prototype, 'reset');
+    const { engine, demuxer, transport } = makeDriftEngine();
+    activateAudio(engine, demuxer, transport);
+    resyncSpy.mockClear(); // the audio activation itself resyncs once
+    resetSpy.mockClear();
+    FakeAudioContext.instances[0]!.currentTime = 2;
+    demuxer()!.emitSequenceHeader({ codec: 'vp8', codedWidth: 640, codedHeight: 480 });
+    // 80 ms ahead of the audio master: past the 60 ms resync threshold.
+    demuxer()!.emitVideo({ type: 'key', timestamp: 2_830_000, data: new Uint8Array([1]) });
+    vi.advanceTimersByTime(30);
+    expect(resyncSpy).toHaveBeenCalledTimes(1);
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+    // An in-sync frame after the reset does not re-trigger.
+    demuxer()!.emitVideo({ type: 'delta', timestamp: 2_750_000, data: new Uint8Array([2]) });
+    vi.advanceTimersByTime(30);
+    expect(resyncSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes the smoothed avOffsetMs through getStats()', () => {
+    const { engine, demuxer, transport } = makeDriftEngine();
+    activateAudio(engine, demuxer, transport);
+    FakeAudioContext.instances[0]!.currentTime = 2;
+    demuxer()!.emitSequenceHeader({ codec: 'vp8', codedWidth: 640, codedHeight: 480 });
+    const VIDEO_PTS = 2_780_000; // 30 ms ahead of the audio master, under the threshold
+    demuxer()!.emitVideo({ type: 'key', timestamp: VIDEO_PTS, data: new Uint8Array([1]) });
+    demuxer()!.emitVideo({ type: 'delta', timestamp: VIDEO_PTS, data: new Uint8Array([2]) });
+    vi.advanceTimersByTime(60);
+    expect(engine.getStats().avOffsetMs).toBe(30);
+  });
+
+  it('never observes drift while audio is inactive and avOffsetMs stays 0', () => {
+    const observeSpy = vi.spyOn(DriftCorrector.prototype, 'observe');
+    const { engine, demuxer, transport } = makeDriftEngine();
+    engine.play();
+    transport.emitOpen();
+    demuxer()!.emitSequenceHeader({ codec: 'vp8', codedWidth: 640, codedHeight: 480 });
+    demuxer()!.emitVideo({ type: 'key', timestamp: 1_000_000, data: new Uint8Array([1]) });
+    vi.advanceTimersByTime(100);
+    expect(observeSpy).not.toHaveBeenCalled();
+    expect(engine.getStats().avOffsetMs).toBe(0);
   });
 });

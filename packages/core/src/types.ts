@@ -16,7 +16,15 @@ export interface PlayerStats {
   framesDropped: number;
   fps: number;
   audioFramesDecoded: number;
+  /** Smoothed A/V offset (video PTS - audio media time) in ms; 0 while audio is inactive. */
+  avOffsetMs: number;
   errors: MediaErrorInfo[];
+  /** Stall episodes detected since playback began (QoS watchdog). */
+  stalledCount: number;
+  /** Total time spent stalled, in ms. */
+  rebufferMs: number;
+  /** Head-to-tail media span currently buffered in the jitter buffer, in ms. */
+  currentBufferMs: number;
 }
 
 export interface PlayerOptions {
@@ -41,12 +49,24 @@ export interface PlayerOptions {
   audio?: boolean;
   /** Injectable wall clock in ms for tests; defaults to performance.now. */
   now?: () => number;
+  /**
+   * QoS / stall-detection tuning. Defaults: `stallThresholdMs` 1500,
+   * `fatalStallMs` 10000.
+   */
+  qos?: {
+    /** No data for this long (ms) declares a stall episode. Default 1500. */
+    stallThresholdMs?: number;
+    /** A stall episode longer than this (ms) is fatal (STALLED error). Default 10000. */
+    fatalStallMs?: number;
+  };
 }
 
 export interface PlayerEvents {
   error: MediaErrorInfo;
   frame: { frame: VideoFrame; ptsUs: number };
   stats: PlayerStats;
+  /** Non-fatal stall-episode notification; payload shape matches 'stats'. */
+  stalled: { stats: PlayerStats };
 }
 
 export interface Player {

@@ -113,7 +113,7 @@ export class TransportPipeline {
     this.clearConnectTimeout();
     this.connectTimer = setTimeout(() => {
       this.connectTimer = null;
-      this.callbacks.onError(mediaError('TRANSPORT', 'connect timeout'));
+      this.callbacks.onError(mediaError('TIMEOUT', 'connect timeout'));
     }, CONNECT_TIMEOUT_MS);
   }
 
