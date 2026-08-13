@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publishes every publishable vigilkit package, in dependency order.
 //
-//   node scripts/publish-all.mjs                      # publish all 8 packages, in order
+//   node scripts/publish-all.mjs                      # publish all 11 packages, in order
 //   node scripts/publish-all.mjs --dry-run            # print the ordered plan, publish nothing
 //   node scripts/publish-all.mjs --only <name>        # publish a single package only (resume)
 //   node scripts/publish-all.mjs --only @vigilkit/plugin-flv --dry-run
@@ -30,6 +30,7 @@ const PACKAGES = [
   { name: '@vigilkit/plugin-flv', dir: 'packages/plugins/flv' },
   { name: '@vigilkit/plugin-ws', dir: 'packages/plugins/ws' },
   { name: '@vigilkit/plugin-hls', dir: 'packages/plugins/hls' },
+  { name: '@vigilkit/plugin-whep', dir: 'packages/plugins/whep' },
   { name: 'vigilkit', dir: 'packages/core' },
   { name: '@vigilkit/plugin-hevc-wasm', dir: 'packages/plugins/hevc-wasm' },
   { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
