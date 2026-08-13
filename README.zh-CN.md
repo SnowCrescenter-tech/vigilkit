@@ -1,13 +1,71 @@
+<p align="right"><a href="README.md">English</a> · <b>简体中文</b></p>
+
 # vigilkit
 
-<!-- 徽章行：发布时在此处替换为真实的 shields.io 徽章（CI 状态、许可证、npm 版本）。 -->
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/vigilkit/vigilkit/actions)
-[![npm](https://img.shields.io/badge/npm-vigilkit-blue.svg)](https://www.npmjs.com/package/vigilkit)
+**面向安防监控与 IoT 视频的 WebCodecs 优先、插件化 Web 视频播放器 SDK。**
 
-**状态：v0.3 完成。rAF 播放泵、带 WebAudio sink 的 AAC 音频播放与 audio-master 音视频同步、WHEP（WebRTC）source 插件均已实现并通过验证。单元测试、e2e（chromium + firefox）与许可证扫描全部通过。**
+微内核引擎，零第三方运行时依赖。将 transport、source 与 demuxer 插件串接成一条解码管线：H.264 帧由浏览器原生 WebCodecs 硬件解码器解码，再通过 WebGPU（零拷贝 `importExternalTexture`）、WebGL2 或 canvas2d 渲染。HEVC 在支持硬件解码的浏览器里走 WebCodecs，其余场景回退到 WASM 软解，这正是 Firefox 播放 HEVC 的方式。AAC 音频经 WebCodecs `AudioDecoder` 解码后，在 WebAudio sink 上按预定时序播放，并做 audio-master 音视频同步；WHEP source 插件以直接帧的形式接入 WebRTC 出流。全部代码在浏览器中运行，专为低延迟、多路并发的安防监控与 IoT 大屏而设计。
 
-vigilkit 是一个开源（Apache-2.0）、WebCodecs 优先、插件化的 Web 视频播放器 SDK，面向安防监控与 IoT 视频场景。核心引擎零第三方运行时依赖。微内核将 transport 插件、source 插件与 demuxer 插件串接成一条解码管线：H.264 帧由浏览器原生 WebCodecs 硬件解码器解码，再通过 WebGPU（零拷贝 `importExternalTexture`）、WebGL2 或 canvas2d 渲染，按浏览器能力自动选择。HEVC 在支持硬件解码的浏览器里走 WebCodecs，其余场景回退到 WASM 软解，这正是 Firefox 播放 HEVC 的方式。AAC 音频经 WebCodecs `AudioDecoder` 解码后，在 WebAudio sink 上按预定时序播放，并做 audio-master 音视频同步；WHEP source 插件以直接帧的形式接入 WebRTC 出流。全部代码在浏览器中运行，专为低延迟、多路并发的安防监控与 IoT 大屏而设计。
+<!-- 徽章行：CI / 许可证 / npm 徽章是针对真实仓库与包名的 shields.io 动态端点。
+     “tests”与“browsers”徽章是静态占位符：接入徽章数据源（CI 产物 / 测试报告）后
+     将替换为动态端点。 -->
+<p align="center">
+  <a href="https://github.com/SnowCrescenter-tech/vigilkit/actions"><img src="https://img.shields.io/github/actions/workflow/status/SnowCrescenter-tech/vigilkit/ci.yml?branch=main&label=CI" alt="CI 状态"></a>
+  <a href="https://www.npmjs.com/package/vigilkit"><img src="https://img.shields.io/npm/v/vigilkit?label=npm%20vigilkit" alt="npm 版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/SnowCrescenter-tech/vigilkit" alt="许可证：Apache-2.0"></a>
+  <a href="#测试"><img src="https://img.shields.io/badge/tests-450%20unit%20tests-brightgreen" alt="450 个单元测试（占位）"></a>
+  <a href="#浏览器支持v03"><img src="https://img.shields.io/badge/browsers-chromium%20%E2%9C%93%20firefox%20%E2%9C%93-blue" alt="Chromium 与 Firefox 均通过测试（占位）"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-3fb950" alt="欢迎 PR"></a>
+</p>
+
+**状态：v0.3 完成。** rAF 播放泵、带 WebAudio sink 的 AAC 音频播放与 audio-master 音视频同步、WHEP（WebRTC）source 插件均已实现并通过验证。单元测试、e2e（chromium + firefox）与许可证扫描全部通过。下一阶段：v0.4（见[路线图](#路线图)）。
+
+---
+
+## 功能特性
+
+| 解码与渲染 | 传输与源 | 引擎 |
+| --- | --- | --- |
+| 经 **WebCodecs** 解码 H.264 / HEVC / AV1（硬件） | **FLV** demuxer 插件（H.264/AAC） | 微内核核心，零第三方运行时依赖 |
+| HEVC **软解回退**（libde265 WASM，Firefox 可用） | **WS** WebSocket transport 插件（`ws`/`wss`） | codec-routing 解码器 + 异步 `isConfigSupported` 探测 |
+| **WebGPU** 零拷贝 `importExternalTexture` 渲染 | **HLS** source 插件（m3u8 + MPEG-TS，VOD + 直播 + ABR） | rAF 播放泵（含隐藏页回退） |
+| **WebGL2** 与 **canvas2d** 渲染器回退 | **WHEP**（WebRTC 出流）直接帧 source 插件 | jitter buffer + QoS 卡顿检测 |
+| AAC 音频：WebCodecs `AudioDecoder` + WebAudio sink | 经 `@vigilkit/plugin-sdk` 接入任意自定义协议 | audio-master 音视频同步（`MasterClock`） |
+
+## 零遥测
+
+**vigilkit 不收集任何遥测数据。无分析、无跟踪、无使用计数、无信标。** 所有代码都在浏览器中运行，vigilkit 除了连接应用要求它连接的流地址外，不会发起任何网络请求。不存在 vigilkit 运营的服务器，没有回传端点，没有任何数据离开你的页面。
+
+## Open-core / 商业模式
+
+- 核心引擎（`vigilkit`）、plugin SDK 与标准插件集**永久以 Apache-2.0 开源**。本项目永远不会给核心功能设置付费墙。
+- 唯一的商业面是一组闭源的企业级附加功能（多路布局、录像回放、加密流、云台控制）以及海康威视、大华、宇视三大安防平台的厂商私有协议定制。
+- 社区可以自由贡献通用与长尾协议插件（WHEP、MQTT 等），HLS 与 WHEP 均已以 source 插件形式交付。三大厂商插件由核心团队开发，具体边界见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 立即体验
+
+本地运行示例应用（前置要求：Node.js 20+ 与 pnpm 9+）：
+
+```sh
+pnpm install
+pnpm --filter @vigilkit/example-basic build
+pnpm --filter @vigilkit/example-basic serve
+```
+
+打开 <http://localhost:8080>。如果 8080 端口被占用，指定其他端口：
+
+```sh
+pnpm --filter @vigilkit/example-basic serve -- --port 9000
+```
+
+示例应用支持四种演示模式，通过 URL 的 `source` 查询参数选择：
+
+| 模式 | 地址 | 播放内容 |
+| --- | --- | --- |
+| FLV（默认） | `?source=flv` | WS-FLV，走引擎管线 |
+| HLS | `?source=hls` | 经 source 插件播放 HLS m3u8 + MPEG-TS |
+| HEVC | `?source=hevc` | 经 libde265 WASM 软解播放 HEVC（Firefox 可用） |
+| WHEP | `?source=whep&endpoint=<resource-url>` | 经 WHEP source 插件播放 WebRTC 出流（需要 WHEP 服务器，例如 MediaMTX） |
 
 ## 从 npm 安装
 
@@ -38,40 +96,13 @@ player.play();
 
 > **注意：** 所有包均为 **ESM-only**。工具链（打包器、开发服务器）需要 Node.js 20+；浏览器需要 WebCodecs 以及 WebGPU、WebGL2 或 canvas2d 用于渲染。
 
-## 零遥测
-
-**vigilkit 不收集任何遥测数据。无分析、无跟踪、无使用计数、无信标。** 所有代码都在浏览器中运行，vigilkit 除了连接应用要求它连接的流地址外，不会发起任何网络请求。不存在 vigilkit 运营的服务器，没有回传端点，没有任何数据离开你的页面。
-
-## Open-core / 商业模式
-
-- 核心引擎（`vigilkit`）、plugin SDK 与标准插件集**永久以 Apache-2.0 开源**。本项目永远不会给核心功能设置付费墙。
-- 唯一的商业面是一组闭源的企业级附加功能（多路布局、录像回放、加密流、云台控制）以及海康威视、大华、宇视三大安防平台的厂商私有协议定制。
-- 社区可以自由贡献通用与长尾协议插件（WHEP、MQTT 等），HLS 与 WHEP 均已以 source 插件形式交付。三大厂商插件由核心团队开发，具体边界见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
 ## 架构
 
 vigilkit 是一个微内核。引擎本身不感知任何传输方式或封装格式，插件通过 plugin SDK 提供这些能力，引擎负责时序与渲染路径。
 
 source 插件产出 `MediaSource`，负责解封装整个容器（HLS、HTTP-FLV、WHEP）；transport 插件把原始字节交给 demuxer 插件（WS-FLV）；两者最终发出相同的 demuxer 事件流。引擎通过 codec-routing 解码器调度编码帧：优先 WebCodecs，浏览器无法解码时回退到软解（例如 HEVC 走 libde265 WASM）；音频块则进入并行的 WebAudio 分支：
 
-```
-   url ──► source 插件 ──► media source / demuxer ──► jitter buffer
-           (hls / flv / whep)  (m3u8+TS / flv / ...)        │
-                                                            ▼
-                                                  codec-routing 解码器
-                                          WebCodecs 优先 ──► 软解回退
-                                          (H.264 / HEVC 硬件)  (libde265 WASM)
-                                                            │
-                                                            ▼
-                                                      master clock
-                                           (audio-master；wall-clock 回退)
-                                                            │
-                                        ┌────────────────────┘
-                                        ▼
-                          renderer surface         audio 分支
-               WebGPU / WebGL2 / canvas2d    AudioDecoder → WebAudio sink
-                         (自动)              (提前 250 ms 调度)
-```
+<img src="docs/vigilkit-architecture.svg" alt="vigilkit 架构图" width="100%">
 
 播放泵以 rAF 为驱动：浏览器中 `requestAnimationFrame` 是主驱动，在没有 rAF 的运行时（Node、worker）回退到 `setInterval(30ms)`，页面隐藏时切换到 250ms 间隔，让解码与背压继续排空而不浪费电量。驱动可通过 `PlayerOptions.pump`（`requestFrame` / `cancelFrame`）注入。
 
@@ -105,15 +136,6 @@ pnpm --filter @vigilkit/example-basic serve
 ```sh
 pnpm --filter @vigilkit/example-basic serve -- --port 9000
 ```
-
-示例应用支持四种演示模式，通过 URL 的 `source` 查询参数选择：
-
-| 模式 | 地址 | 播放内容 |
-| --- | --- | --- |
-| FLV（默认） | `?source=flv` | WS-FLV，走引擎管线 |
-| HLS | `?source=hls` | 经 source 插件播放 HLS m3u8 + MPEG-TS |
-| HEVC | `?source=hevc` | 经 libde265 WASM 软解播放 HEVC（Firefox 可用） |
-| WHEP | `?source=whep&endpoint=<resource-url>` | 经 WHEP source 插件播放 WebRTC 出流（需要 WHEP 服务器，例如 MediaMTX） |
 
 基本用法：
 
@@ -221,18 +243,10 @@ docker run -p 8889:8889 -p 8554:8554 bluenviron/mediamtx
 
 WebGPU 通过 `createRendererAsync(canvas, { prefer })` 优雅回退到 WebGL2，再回退到 canvas2d。e2e 套件对每个用例同时跑 chromium 与 firefox；headless Firefox 没有 WebGPU 适配器，在 WebGL2 也不可用时 `renderMode` 可能回退到 canvas2d。
 
-## 路线图
-
-- **v0.1** ✅：微内核 + FLV/WS 插件 + WebGL2 渲染 + H.264。
-- **v0.2** ✅：WebGPU 零拷贝渲染后端；HLS source 插件；HEVC WASM 软解（隔离的 LGPL 模块），让 Firefox 也能播放 HEVC。
-- **v0.3** ✅：rAF 驱动的播放泵（含隐藏页回退）；WebAudio sink + audio-master 音视频同步的 AAC 音频播放；WHEP（WebRTC）source 插件；Firefox e2e 覆盖；发布工具链（publish-all / verify-pack / release workflow）。
-- **v0.4**：insertable-streams WHEP 编码路径；采样级音视频同步；FLV H.265 / TS-HEVC 引擎接入；真 GPU 上的 WebGPU e2e；worker 卡死专项排查；DASH source 插件。
-- **v1.0**：API 冻结、plugin SDK 稳定版、双语文档。
-
 ## 测试
 
 ```sh
-pnpm test            # 10 个包共 361 个单元测试
+pnpm test            # 10 个包共 450 个单元测试
 pnpm test:e2e        # Playwright e2e：4 个用例 × chromium + firefox = 8 次运行（FLV x2、HLS、HEVC）
 node scripts/check-licenses.mjs --ci   # 许可证扫描，结论必须保持 PASS
 ```
@@ -243,9 +257,22 @@ node scripts/check-licenses.mjs --ci   # 许可证扫描，结论必须保持 PA
 
 `pnpm notices` 会根据已安装的依赖树重新生成 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
+## 路线图
+
+- **v0.1** ✅：微内核 + FLV/WS 插件 + WebGL2 渲染 + H.264。
+- **v0.2** ✅：WebGPU 零拷贝渲染后端；HLS source 插件；HEVC WASM 软解（隔离的 LGPL 模块），让 Firefox 也能播放 HEVC。
+- **v0.3** ✅：rAF 驱动的播放泵（含隐藏页回退）；WebAudio sink + audio-master 音视频同步的 AAC 音频播放；WHEP（WebRTC）source 插件；Firefox e2e 覆盖；发布工具链（publish-all / verify-pack / release workflow）。
+- **v0.4**：insertable-streams WHEP 编码路径；采样级音视频同步；FLV H.265 / TS-HEVC 引擎接入；真 GPU 上的 WebGPU e2e；worker 卡死专项排查；DASH source 插件。
+- **v1.0**：API 冻结、plugin SDK 稳定版、双语文档。
+
 ## 参与贡献
 
-插件编写指南、商业边界与工程规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+vigilkit 以 Apache-2.0 开源，欢迎任何贡献。核心引擎稳定，插件体系正是为此设计：**如果你的协议不在这里，就写一个插件并分享它。**
+
+- 在 [GitHub](https://github.com/SnowCrescenter-tech/vigilkit) 上**给仓库点 Star**，帮助更多人发现它。
+- 通过 [issues](https://github.com/SnowCrescenter-tech/vigilkit/issues)**报告缺陷、提出需求**。
+- **编写插件**：插件编写指南、商业边界与工程规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 在 [ROADMAP.md](ROADMAP.md)**查看后续规划**。
 
 ## 许可证
 

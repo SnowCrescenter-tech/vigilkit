@@ -1,13 +1,71 @@
+<p align="right"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
+
 # vigilkit
 
-<!-- Badge row: add real shields.io badges here on publish (CI status, license, npm version). -->
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/vigilkit/vigilkit/actions)
-[![npm](https://img.shields.io/badge/npm-vigilkit-blue.svg)](https://www.npmjs.com/package/vigilkit)
+**WebCodecs-first, plugin-based web video player SDK for surveillance and IoT video.**
 
-**Status: v0.3 complete. The rAF playback pump, AAC audio playback with a WebAudio sink and audio-master A/V sync, and the WHEP (WebRTC) source plugin are done and verified. Unit tests, e2e (chromium + firefox), and license scan all green.**
+A microkernel engine with zero third-party runtime dependencies. Wire transport, source, and demuxer plugins into a single decode pipeline: H.264 decodes through the browser's native WebCodecs hardware decoder and draws through WebGPU (zero-copy `importExternalTexture`), WebGL2, or canvas2d. HEVC plays through WebCodecs where hardware decode exists and through a WASM soft-decode fallback everywhere else, which is how Firefox gets HEVC. AAC audio decodes through WebCodecs `AudioDecoder` and is scheduled ahead on a WebAudio sink with audio-master A/V sync. The WHEP source plugin brings WebRTC egress streams in as direct frames. Everything runs in the browser, built for low-latency, multi-stream surveillance and IoT dashboards.
 
-vigilkit is an open-source (Apache-2.0), WebCodecs-first, plugin-based web video player SDK for surveillance and IoT video. The core engine has zero third-party runtime dependencies. A microkernel wires transport plugins, source plugins, and demuxer plugins into a single decode pipeline: H.264 frames are decoded with the browser's native WebCodecs hardware decoder and drawn through WebGPU (zero-copy `importExternalTexture`), WebGL2, or canvas2d, whichever the browser supports. HEVC plays through WebCodecs where hardware decode exists, and through a WASM soft-decode fallback everywhere else, which is how Firefox gets HEVC. AAC audio decodes through WebCodecs `AudioDecoder` and is scheduled ahead on a WebAudio sink with audio-master A/V sync, and the WHEP source plugin brings WebRTC egress streams in as direct frames. Everything runs in the browser, and it is built for low-latency, multi-stream surveillance and IoT dashboards.
+<!-- Badge row: CI / license / npm badges are live shields.io endpoints against the real repo and package.
+     The "tests" and "browsers" badges are static placeholders: they will become live once a badge
+     data source (CI artifact / test report) is wired up. -->
+<p align="center">
+  <a href="https://github.com/SnowCrescenter-tech/vigilkit/actions"><img src="https://img.shields.io/github/actions/workflow/status/SnowCrescenter-tech/vigilkit/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://www.npmjs.com/package/vigilkit"><img src="https://img.shields.io/npm/v/vigilkit?label=npm%20vigilkit" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/SnowCrescenter-tech/vigilkit" alt="License: Apache-2.0"></a>
+  <a href="#testing"><img src="https://img.shields.io/badge/tests-450%20unit%20tests-brightgreen" alt="450 unit tests (placeholder)"></a>
+  <a href="#browser-support-v03"><img src="https://img.shields.io/badge/browsers-chromium%20%E2%9C%93%20firefox%20%E2%9C%93-blue" alt="Tested on Chromium and Firefox (placeholder)"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-3fb950" alt="PRs welcome"></a>
+</p>
+
+**Status: v0.3 complete.** The rAF playback pump, AAC audio playback with a WebAudio sink and audio-master A/V sync, and the WHEP (WebRTC) source plugin are done and verified. Unit tests, e2e (chromium + firefox), and license scan all green. Next up: v0.4 (see [Roadmap](#roadmap)).
+
+---
+
+## Features
+
+| Decode & render | Sources & transports | Engine |
+| --- | --- | --- |
+| H.264 / HEVC / AV1 via **WebCodecs** (hardware) | **FLV** demuxer plugin (H.264/AAC) | Microkernel core with zero third-party runtime dependencies |
+| HEVC **soft-decode fallback** via libde265 WASM (Firefox) | **WS** WebSocket transport (`ws`/`wss`) | Codec-routing decoder with async `isConfigSupported` probe |
+| **WebGPU** zero-copy `importExternalTexture` rendering | **HLS** source plugin (m3u8 + MPEG-TS, VOD + live + ABR) | rAF playback pump with hidden-tab fallback |
+| **WebGL2** and **canvas2d** renderer fallbacks | **WHEP** (WebRTC egress) direct-frame source plugin | Jitter buffer + QoS stall detection |
+| AAC audio via WebCodecs `AudioDecoder` + WebAudio sink | Any custom protocol via `@vigilkit/plugin-sdk` | Audio-master A/V sync (`MasterClock`) |
+
+## Zero telemetry
+
+**vigilkit collects no telemetry. No analytics, no tracking, no usage counters, no beacons.** All code runs in the browser, and vigilkit never makes a network call other than the stream URL your application asks it to connect to. There is no vigilkit-operated server, no phone-home endpoint, and no data leaves your page.
+
+## Open-core / business model
+
+- The core engine (`vigilkit`), the plugin SDK, and the standard plugin set are **Apache-2.0 forever**. This project will never paywall the core.
+- The only commercial surface is a closed set of enterprise add-ons (multi-view layouts, recording, encrypted streams, PTZ control) and vendor-protocol customization for the Hikvision, Dahua, and Uniview surveillance platforms.
+- Community contributions to general and long-tail protocol plugins (WHEP, MQTT, and more) are welcome; HLS and WHEP are already shipped as source plugins. The three major vendor plugins are developed by the core team; see [CONTRIBUTING.md](CONTRIBUTING.md) for the exact boundary.
+
+## Try it
+
+Run the example app locally (Prerequisites: Node.js 20+ and pnpm 9+):
+
+```sh
+pnpm install
+pnpm --filter @vigilkit/example-basic build
+pnpm --filter @vigilkit/example-basic serve
+```
+
+Open <http://localhost:8080>. If port 8080 is busy, pass a custom port:
+
+```sh
+pnpm --filter @vigilkit/example-basic serve -- --port 9000
+```
+
+The example app supports four demo modes, selected with the `source` query parameter:
+
+| Mode | URL | What plays |
+| --- | --- | --- |
+| FLV (default) | `?source=flv` | WS-FLV, engine pipeline |
+| HLS | `?source=hls` | HLS m3u8 + MPEG-TS via the source plugin |
+| HEVC | `?source=hevc` | HEVC soft-decode via libde265 WASM (works in Firefox) |
+| WHEP | `?source=whep&endpoint=<resource-url>` | WebRTC egress via the WHEP source plugin (needs a WHEP server, e.g. MediaMTX) |
 
 ## Install from npm
 
@@ -38,40 +96,13 @@ player.play();
 
 > **Note:** all packages are **ESM-only**. Tooling (bundlers, dev servers) requires Node.js 20+; the browser needs WebCodecs plus WebGPU, WebGL2, or canvas2d for rendering.
 
-## Zero telemetry
-
-**vigilkit collects no telemetry. No analytics, no tracking, no usage counters, no beacons.** All code runs in the browser, and vigilkit never makes a network call other than the stream URL your application asks it to connect to. There is no vigilkit-operated server, no phone-home endpoint, and no data leaves your page.
-
-## Open-core / business model
-
-- The core engine (`vigilkit`), the plugin SDK, and the standard plugin set are **Apache-2.0 forever**. This project will never paywall the core.
-- The only commercial surface is a closed set of enterprise add-ons (multi-view layouts, recording, encrypted streams, PTZ control) and vendor-protocol customization for the Hikvision, Dahua, and Uniview surveillance platforms.
-- Community contributions to general and long-tail protocol plugins (WHEP, MQTT, and more) are welcome; HLS and WHEP are already shipped as source plugins. The three major vendor plugins are developed by the core team; see [CONTRIBUTING.md](CONTRIBUTING.md) for the exact boundary.
-
 ## Architecture
 
 vigilkit is a microkernel. The engine itself knows nothing about transports or container formats; plugins supply them through the plugin SDK, and the engine owns the timing and rendering path.
 
 Source plugins produce a `MediaSource` that demuxes a whole container (HLS, FLV over HTTP, WHEP); transport plugins feed raw bytes to a demuxer plugin (WS-FLV); both emit the same demuxer event stream. The engine routes encoded chunks through a codec-routing decoder that prefers WebCodecs and falls back to a soft decoder (e.g. libde265 WASM for HEVC) when the browser cannot decode the codec, and routes audio chunks into a parallel WebAudio branch:
 
-```
-   url ──► source plugin ──► media source / demuxer ──► jitter buffer
-           (hls / flv / whep)  (m3u8+TS / flv / ...)         │
-                                                             ▼
-                                                   codec-routing decoder
-                                         WebCodecs first ──► soft fallback
-                                         (H.264 / HEVC HW)   (libde265 WASM)
-                                                             │
-                                                             ▼
-                                                     master clock
-                                          (audio-master; wall-clock fallback)
-                                                             │
-                                        ┌─────────────────────┘
-                                        ▼
-                         renderer surface         audio branch
-               WebGPU / WebGL2 / canvas2d    AudioDecoder → WebAudio sink
-                         (auto)              (scheduled 250 ms ahead)
-```
+<img src="docs/vigilkit-architecture.svg" alt="vigilkit architecture diagram" width="100%">
 
 The playback pump is rAF-driven: `requestAnimationFrame` is the primary driver in browsers, with a `setInterval(30ms)` fallback in runtimes without rAF (Node, workers) and a 250ms interval while the tab is hidden so decode and backpressure keep draining without burning battery. The drivers are injectable via `PlayerOptions.pump` (`requestFrame` / `cancelFrame`).
 
@@ -105,15 +136,6 @@ Open <http://localhost:8080>. If port 8080 is busy, pass a custom port and open 
 ```sh
 pnpm --filter @vigilkit/example-basic serve -- --port 9000
 ```
-
-The example app supports four demo modes, selected with the `source` query parameter:
-
-| Mode | URL | What plays |
-| --- | --- | --- |
-| FLV (default) | `?source=flv` | WS-FLV, engine pipeline |
-| HLS | `?source=hls` | HLS m3u8 + MPEG-TS via the source plugin |
-| HEVC | `?source=hevc` | HEVC soft-decode via libde265 WASM (works in Firefox) |
-| WHEP | `?source=whep&endpoint=<resource-url>` | WebRTC egress via the WHEP source plugin (needs a WHEP server, e.g. MediaMTX) |
 
 Basic usage:
 
@@ -223,18 +245,10 @@ MediaMTX then publishes WHEP at `http://localhost:8889/<stream>/whep`. Note that
 
 WebGPU gracefully falls back to WebGL2, then canvas2d, via `createRendererAsync(canvas, { prefer })`. The e2e suite runs every spec against both chromium and firefox; headless Firefox has no WebGPU adapter and may fall back to canvas2d `renderMode` when WebGL2 is also unavailable.
 
-## Roadmap
-
-- **v0.1** ✅: microkernel + FLV/WS plugins + WebGL2 rendering + H.264.
-- **v0.2** ✅: WebGPU zero-copy rendering backend; HLS source plugin; HEVC WASM soft-decode as an isolated LGPL module so Firefox can play HEVC.
-- **v0.3** ✅: rAF-driven playback pump (with hidden-tab fallback); AAC audio playback with WebAudio sink and audio-master A/V sync; WHEP (WebRTC) source plugin; Firefox e2e coverage; release tooling (publish-all / verify-pack / release workflow).
-- **v0.4**: insertable-streams WHEP encoded path; sample-accurate A/V sync; FLV H.265 / TS-HEVC engine integration; WebGPU e2e on a real GPU; worker-wedge investigation; DASH source plugin.
-- **v1.0**: API freeze, stable plugin SDK, bilingual documentation.
-
 ## Testing
 
 ```sh
-pnpm test            # 361 unit tests across 10 packages
+pnpm test            # 450 unit tests across 10 packages
 pnpm test:e2e        # Playwright e2e: 4 specs × chromium + firefox = 8 runs (FLV x2, HLS, HEVC)
 node scripts/check-licenses.mjs --ci   # license scan, verdict must stay PASS
 ```
@@ -245,9 +259,22 @@ Release tooling quick notes: `scripts/publish-all.mjs` publishes the 8 publishab
 
 `pnpm notices` regenerates [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) from the installed dependency tree.
 
-## Contributing
+## Roadmap
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for plugin authoring, the business boundary, and engineering standards.
+- **v0.1** ✅: microkernel + FLV/WS plugins + WebGL2 rendering + H.264.
+- **v0.2** ✅: WebGPU zero-copy rendering backend; HLS source plugin; HEVC WASM soft-decode as an isolated LGPL module so Firefox can play HEVC.
+- **v0.3** ✅: rAF-driven playback pump (with hidden-tab fallback); AAC audio playback with WebAudio sink and audio-master A/V sync; WHEP (WebRTC) source plugin; Firefox e2e coverage; release tooling (publish-all / verify-pack / release workflow).
+- **v0.4**: insertable-streams WHEP encoded path; sample-accurate A/V sync; FLV H.265 / TS-HEVC engine integration; WebGPU e2e on a real GPU; worker-wedge investigation; DASH source plugin.
+- **v1.0**: API freeze, stable plugin SDK, bilingual documentation.
+
+## Get involved
+
+vigilkit is Apache-2.0 and open to contributors. The core is stable, the plugin surface is designed for exactly this: **if your protocol is not here, write a plugin and share it.**
+
+- **Star the repo** on [GitHub](https://github.com/SnowCrescenter-tech/vigilkit) to help others discover it.
+- **Report bugs and request features** via [issues](https://github.com/SnowCrescenter-tech/vigilkit/issues).
+- **Author a plugin**: plugin authoring, the business boundary, and engineering standards are in [CONTRIBUTING.md](CONTRIBUTING.md).
+- **See what is next** in [ROADMAP.md](ROADMAP.md).
 
 ## License
 
