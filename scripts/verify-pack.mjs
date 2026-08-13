@@ -4,7 +4,7 @@
 //
 //   node scripts/verify-pack.mjs
 //
-// For each of the 8 packages it runs a real `pnpm pack --pack-destination
+// For each of the 9 packages it runs a real `pnpm pack --pack-destination
 // <tmp>`, extracts the tarball, and asserts:
 //   (a) dist/index.js and dist/index.d.ts are present in the tarball;
 //   (b) there is NO node_modules directory anywhere inside the tarball;
@@ -30,6 +30,7 @@ const PACKAGES = [
   { name: '@vigilkit/plugin-hls', dir: 'packages/plugins/hls' },
   { name: 'vigilkit', dir: 'packages/core' },
   { name: '@vigilkit/plugin-hevc-wasm', dir: 'packages/plugins/hevc-wasm' },
+  { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
   { name: '@vigilkit/renderer', dir: 'packages/renderer' },
 ];
 

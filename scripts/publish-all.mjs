@@ -32,6 +32,7 @@ const PACKAGES = [
   { name: '@vigilkit/plugin-hls', dir: 'packages/plugins/hls' },
   { name: 'vigilkit', dir: 'packages/core' },
   { name: '@vigilkit/plugin-hevc-wasm', dir: 'packages/plugins/hevc-wasm' },
+  { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
   { name: '@vigilkit/renderer', dir: 'packages/renderer' },
 ];
 
