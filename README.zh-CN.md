@@ -117,7 +117,9 @@ WHEP 是上述管线的例外：它以 `frame` 事件直接投递已解码的 `V
 | `@vigilkit/plugin-ws` | WebSocket transport 插件（`ws` / `wss`）。 |
 | `@vigilkit/plugin-hls` | HLS source 插件：m3u8 解析、MPEG-TS 解封装、H.264 → AVCC + avcC description、AAC 经首个 ADTS 帧生成 `audio-config`（剥离 ADTS 头，投递原始 AAC 载荷）、VOD + 直播重载 + ABR 变体选择、PTS 不连续偏移。 |
 | `@vigilkit/plugin-hevc-wasm` | LGPL-3.0 libde265 适配器，实现核心的 `VideoCodecDecoder` 接口；sha256 锁定的产物加载器 + `wasmBinary` 注入；I420 → `VideoFrame`，带 canvas RGBA 回退。 |
-| `@vigilkit/plugin-whep` | WHEP（WebRTC-HTTP Egress Protocol）media source 插件：POST offer / PATCH answer + trickle ICE，以直接 `frame` 事件投递已解码的 `VideoFrame`（绕过编码解码链）。 |
+| `@vigilkit/plugin-dav1d-wasm` | AV1 WASM 软解适配器（CC0/BSD dav1d.js 封装 vendored dav1d 产物），实现 `VideoCodecDecoder`，与 HEVC 插件相同的「产物隔离 + sha256 锁定加载器」模式。 |
+| `@vigilkit/plugin-whep` | WHEP（WebRTC-HTTP Egress Protocol）media source 插件：POST offer / PATCH answer + trickle ICE，以直接 `frame` 事件投递已解码的 `VideoFrame`（绕过编码解码链）；另支持 insertable-streams 编码路径（仅 Chromium）。 |
+| `@vigilkit/plugin-hikvision` | 海康 ISAPI 厂商插件：HTTP Digest 认证（RFC 7616、MD5）、设备发现、通道枚举、云台控制、RTSP/HTTP 流地址构建。零运行时依赖。 |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})`，WebGPU → WebGL2 → canvas2d 依次回退；`WebGPURenderer` 零拷贝 `importExternalTexture`。 |
 | `@vigilkit/example-basic` | 私有示例应用：FLV / HLS / HEVC / WHEP 四种演示模式，供 e2e 套件使用。 |
 

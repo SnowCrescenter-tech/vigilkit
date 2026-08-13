@@ -117,7 +117,9 @@ WHEP is the exception to the pipeline above: it delivers already-decoded `VideoF
 | `@vigilkit/plugin-ws` | WebSocket transport plugin (`ws` / `wss`). |
 | `@vigilkit/plugin-hls` | HLS source plugin: m3u8 parser, MPEG-TS demuxer, H.264 → AVCC + avcC description, AAC via first-ADTS-frame `audio-config` (ADTS headers stripped, raw AAC payload), VOD + live reload + ABR variant select, PTS discontinuity offset. |
 | `@vigilkit/plugin-hevc-wasm` | LGPL-3.0 libde265 adapter implementing the core's `VideoCodecDecoder` interface; sha256-pinned artifact loader with `wasmBinary` injection; I420 → `VideoFrame` with canvas RGBA fallback. |
-| `@vigilkit/plugin-whep` | WHEP (WebRTC-HTTP Egress Protocol) media source plugin: POST offer / PATCH answer + trickle ICE, emits decoded `VideoFrame`s as direct `frame` events (bypasses the encoded decode chain). |
+| `@vigilkit/plugin-dav1d-wasm` | AV1 WASM soft-decode adapter (CC0/BSD dav1d.js wrapping a vendored dav1d artifact) implementing `VideoCodecDecoder`, same isolated-artifact + sha256-pinned loader pattern as the HEVC plugin. |
+| `@vigilkit/plugin-whep` | WHEP (WebRTC-HTTP Egress Protocol) media source plugin: POST offer / PATCH answer + trickle ICE, emits decoded `VideoFrame`s as direct `frame` events (bypasses the encoded decode chain); also supports an insertable-streams encoded path (Chromium-only). |
+| `@vigilkit/plugin-hikvision` | Hikvision ISAPI vendor plugin: HTTP Digest auth (RFC 7616, MD5), device discovery, channel enumeration, PTZ control, and RTSP/HTTP stream URL building. Zero runtime dependencies. |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})` with WebGPU → WebGL2 → canvas2d fallback; zero-copy `importExternalTexture` in `WebGPURenderer`. |
 | `@vigilkit/example-basic` | Private example app: FLV / HLS / HEVC / WHEP demo modes, used by the e2e suite. |
 
