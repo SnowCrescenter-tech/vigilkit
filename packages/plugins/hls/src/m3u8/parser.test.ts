@@ -116,4 +116,94 @@ seg-0.ts
   it('throws HlsError when #EXTM3U is missing', () => {
     expect(() => parseM3u8('#EXT-X-TARGETDURATION:2\n#EXTINF:1.0,\nseg.ts')).toThrow(HlsError);
   });
+
+  describe('#EXT-X-KEY', () => {
+    const KEYED = `#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="https://keys.example/key.bin",IV=0x0102030405060708090a0b0c0d0e0f10
+#EXTINF:2.0,
+seg-0.ts
+#EXTINF:2.0,
+seg-1.ts
+`;
+
+    it('parses a quoted key URI and hex IV onto every following segment', () => {
+      const playlist = parseM3u8(KEYED);
+      expect(playlist.segments).toHaveLength(2);
+      for (const segment of playlist.segments) {
+        expect(segment.key).toEqual({
+          method: 'AES-128',
+          uri: 'https://keys.example/key.bin',
+          iv: '0x0102030405060708090a0b0c0d0e0f10',
+        });
+      }
+    });
+
+    it('leaves key.iv undefined when the IV attribute is absent', () => {
+      const playlist = parseM3u8(`#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="key.bin"
+#EXTINF:2.0,
+seg-0.ts
+`);
+      expect(playlist.segments[0]?.key).toEqual({ method: 'AES-128', uri: 'key.bin' });
+    });
+
+    it('a new #EXT-X-KEY replaces the previous key', () => {
+      const playlist = parseM3u8(`#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="key-a.bin"
+#EXTINF:2.0,
+seg-0.ts
+#EXT-X-KEY:METHOD=AES-128,URI="key-b.bin"
+#EXTINF:2.0,
+seg-1.ts
+`);
+      expect(playlist.segments[0]?.key).toEqual({ method: 'AES-128', uri: 'key-a.bin' });
+      expect(playlist.segments[1]?.key).toEqual({ method: 'AES-128', uri: 'key-b.bin' });
+    });
+
+    it('METHOD=NONE clears the key for following segments', () => {
+      const playlist = parseM3u8(`#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="key.bin"
+#EXTINF:2.0,
+seg-0.ts
+#EXT-X-KEY:METHOD=NONE
+#EXTINF:2.0,
+seg-1.ts
+`);
+      expect(playlist.segments[0]?.key).toEqual({ method: 'AES-128', uri: 'key.bin' });
+      expect(playlist.segments[1]?.key).toBeUndefined();
+    });
+
+    it('an unrecognized METHOD is treated as NONE (no key applies)', () => {
+      const playlist = parseM3u8(`#EXTM3U
+#EXT-X-KEY:METHOD=SAMPLE-AES,URI="key.bin"
+#EXTINF:2.0,
+seg-0.ts
+`);
+      expect(playlist.segments[0]?.key).toBeUndefined();
+    });
+
+    it('a malformed KEY tag is treated as NONE (no key applies)', () => {
+      // AES-128 without a URI: cannot decrypt, treat as unencrypted.
+      const noUri = parseM3u8(`#EXTM3U
+#EXT-X-KEY:METHOD=AES-128
+#EXTINF:2.0,
+seg-0.ts
+`);
+      expect(noUri.segments[0]?.key).toBeUndefined();
+      // A METHOD value that is not a quoted/known token.
+      const noMethod = parseM3u8(`#EXTM3U
+#EXT-X-KEY:URI="key.bin"
+#EXTINF:2.0,
+seg-0.ts
+`);
+      expect(noMethod.segments[0]?.key).toBeUndefined();
+      // An IV that is not 0x + 32 hex digits (wrong length).
+      const badIv = parseM3u8(`#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="key.bin",IV=0x1234
+#EXTINF:2.0,
+seg-0.ts
+`);
+      expect(badIv.segments[0]?.key).toBeUndefined();
+    });
+  });
 });

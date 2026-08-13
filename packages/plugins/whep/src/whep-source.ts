@@ -1,4 +1,5 @@
 import type { DemuxerEvent, MediaSource, SourceOptions } from '@vigilkit/plugin-sdk';
+import { EncodedMediaPipeline } from './whep-encoded-pipeline.js';
 import { hasVideoMedia, resolvePatchUrl } from './whep-sdp.js';
 
 /**
@@ -18,6 +19,17 @@ export interface WhepSourceOptions extends SourceOptions {
   RTCPeerConnectionCtor?: new (configuration?: RTCConfiguration) => RTCPeerConnection;
   /** Injectable MediaStreamTrackProcessor constructor for tests. Defaults to globalThis.MediaStreamTrackProcessor. */
   MediaStreamTrackProcessorCtor?: new (init: { track: MediaStreamTrack }) => TrackProcessorLike;
+  /**
+   * When true, captures the encoded (RTP) media via `RTCRtpScriptTransform`
+   * insertable streams instead of decoded `VideoFrame`s, feeding the engine's
+   * encoded decode chain. **Chromium-only**: `RTCRtpScriptTransform` has no
+   * Firefox or Safari support. Defaults to false (the direct-frame path).
+   */
+  encoded?: boolean;
+  /** Injectable RTCRtpScriptTransform constructor for tests. Defaults to globalThis.RTCRtpScriptTransform. */
+  RTCRtpScriptTransformCtor?: new (worker: Worker, options?: Record<string, unknown>) => unknown;
+  /** Injectable worker factory for tests. Defaults to an inline blob worker. */
+  createWorker?: () => Worker;
   /** Base URL used to resolve a relative `Location` header from the POST response. */
   location?: string;
 }
@@ -55,6 +67,7 @@ export class WhepSource implements MediaSource {
   private patchUrl: string | null = null;
   private etag: string | null = null;
   private pendingCandidates: RTCIceCandidateInit[] = [];
+  private encodedPipeline: EncodedMediaPipeline | null = null;
 
   constructor(
     private readonly url: string,
@@ -86,6 +99,9 @@ export class WhepSource implements MediaSource {
     const reader = this.reader;
     this.reader = null;
     if (reader !== null) void reader.cancel().catch(() => {});
+    const pipeline = this.encodedPipeline;
+    this.encodedPipeline = null;
+    if (pipeline !== null) pipeline.detach();
   }
 
   onEvent(listener: (event: DemuxerEvent) => void): () => void {
@@ -94,19 +110,36 @@ export class WhepSource implements MediaSource {
   }
 
   private async connect(): Promise<void> {
+    const encoded = this.options.encoded === true;
     const rtcCtor = this.options.RTCPeerConnectionCtor ?? globalThis.RTCPeerConnection;
     const processorCtor = this.options.MediaStreamTrackProcessorCtor ?? globalThis.MediaStreamTrackProcessor;
-    if (typeof rtcCtor === 'undefined' || typeof processorCtor === 'undefined') {
+    const transformCtor = this.options.RTCRtpScriptTransformCtor ?? globalThis.RTCRtpScriptTransform;
+    const usesDefaultWorker = this.options.createWorker === undefined;
+    if (
+      typeof rtcCtor === 'undefined' ||
+      (!encoded && typeof processorCtor === 'undefined') ||
+      (encoded && (typeof transformCtor === 'undefined' || (usesDefaultWorker && typeof globalThis.Worker === 'undefined')))
+    ) {
       throw new WhepUnsupportedError('WebRTC or MediaStreamTrackProcessor is unavailable in this browser');
     }
     const pc = new rtcCtor();
     this.pc = pc;
-    pc.ontrack = (event) => this.handleTrack(event.track, processorCtor);
+    pc.ontrack = (event) => {
+      if (encoded) this.handleTrackEncoded(event.track);
+      else this.handleTrack(event.track, processorCtor);
+    };
     pc.onicecandidate = (event) => {
       if (event.candidate !== null) this.queueCandidate(event.candidate.toJSON());
     };
     pc.oniceconnectionstatechange = () => this.handleIceState(pc);
 
+    if (encoded) {
+      // Reserve both m-lines so the SDP answer carries the audio+video
+      // sections the encoded path feeds (RTCRtpScriptTransform is applied per
+      // receiver, and only exists for m-lines present in the negotiated SDP).
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+    }
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     const handshake = await this.postOffer(pc.localDescription?.sdp ?? offer.sdp ?? '');
@@ -123,6 +156,15 @@ export class WhepSource implements MediaSource {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await this.patchAnswer(answer.sdp ?? '');
+    }
+    if (encoded) {
+      // Emit the SDP-provided configs (sprop-parameter-sets / Opus rtpmap)
+      // before any frames: the workers are wired lazily on `ontrack`.
+      this.encodedPipeline = new EncodedMediaPipeline(handshake.sdp, {
+        emit: (event) => this.dispatch(event),
+        RTCRtpScriptTransformCtor: this.options.RTCRtpScriptTransformCtor,
+        createWorker: this.options.createWorker,
+      });
     }
     await this.flushCandidates();
   }
@@ -216,6 +258,17 @@ export class WhepSource implements MediaSource {
     const reader = processor.readable.getReader();
     this.reader = reader;
     void this.readLoop(reader);
+  }
+
+  /**
+   * Encoded path: attaches an `RTCRtpScriptTransform` to the track's receiver
+   * via the encoded pipeline (which also owns the assembled event stream).
+   */
+  private handleTrackEncoded(track: MediaStreamTrack): void {
+    if (this.stopped) return;
+    const pc = this.pc;
+    if (pc === null) return;
+    this.encodedPipeline?.attachReceiver(pc, track);
   }
 
   private async readLoop(reader: ReadableStreamDefaultReader<VideoFrame>): Promise<void> {

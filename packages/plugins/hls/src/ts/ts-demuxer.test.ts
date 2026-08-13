@@ -162,6 +162,39 @@ describe('TsDemuxer', () => {
     expect(errors).toHaveLength(0);
   });
 
+  it('keeps internal buffers bounded across a long live feed', () => {
+    const demuxer = new TsDemuxer();
+    const events = collect(demuxer);
+    const internal = demuxer as unknown as {
+      pesBuffers: Map<number, Uint8Array>;
+      adtsCarry: Uint8Array;
+      packetizer: { buffer: Uint8Array };
+    };
+    let maxPesBuffers = 0;
+    let maxAdtsCarry = 0;
+    let maxPacketizer = 0;
+    for (let i = 0; i < 300; i++) {
+      demuxer.push(buildSegment());
+      demuxer.flush();
+      maxPesBuffers = Math.max(maxPesBuffers, internal.pesBuffers.size);
+      maxAdtsCarry = Math.max(maxAdtsCarry, internal.adtsCarry.length);
+      maxPacketizer = Math.max(maxPacketizer, internal.packetizer.buffer.length);
+    }
+    // Every flush drains partial state: nothing accumulates across segments.
+    expect(internal.pesBuffers.size).toBe(0);
+    expect(internal.adtsCarry.length).toBe(0);
+    expect(internal.packetizer.buffer.length).toBe(0);
+    // During the feed the buffers never grow past a single segment's worth.
+    expect(maxPesBuffers).toBeLessThanOrEqual(1);
+    expect(maxAdtsCarry).toBeLessThan(1024);
+    expect(maxPacketizer).toBeLessThanOrEqual(188);
+    // The demuxer kept producing output the whole way through (no truncation).
+    const videos = events.filter((event): event is VideoEvent => event.type === 'video');
+    expect(videos.length).toBeGreaterThanOrEqual(300);
+    const errors = events.filter((event) => event.type === 'error');
+    expect(errors).toHaveLength(0);
+  });
+
   it('parses the real h264small.ts fixture', () => {
     const fixturePath = fileURLToPath(new URL('../../../../../examples/basic/hls-fixtures/seg-0.ts', import.meta.url));
     const bytes = readFileSync(fixturePath);

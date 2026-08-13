@@ -1,0 +1,22 @@
+vigilkit plugin-dav1d-wasm
+
+This product includes software developed by vigilkit contributors
+(https://github.com/vigilkit/vigilkit). The glue code in this package is
+licensed under the Apache License 2.0; see LICENSE.
+
+BSD-2-Clause subcomponent: dav1d (AV1 decoder)
+
+This package is an adapter for the WebAssembly build of dav1d, an open
+AV1 decoder, distributed via the npm package dav1d.js
+(https://github.com/Kagami/dav1d.js) and vendored for this project in
+examples/basic/vendor/dav1d-esm.js + dav1d.wasm (sha256-pinned).
+
+The dav1d decoder core is licensed under the BSD 2-Clause License
+(https://code.videolan.org/videolan/dav1d). The wrapper code around the
+wasm binary (dav1d.js / dav1d-esm.js) is licensed under CC0-1.0
+(https://creativecommons.org/publicdomain/zero/1.0/). Both licenses are
+permissive; neither imposes a source-offer or re-linkability obligation
+on this package.
+
+The Apache-2.0 license applies only to the glue code written by vigilkit;
+it does not apply to the dav1d artifact itself.
