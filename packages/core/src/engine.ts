@@ -11,12 +11,14 @@ import { nativeDecoderFactory } from './decoder.js';
 import type { VideoCodecDecoder, VideoDecoderFactory } from './decoder.js';
 import { nativeAudioDecoderFactory, type AudioDecoderFactory } from './audio-decoder.js';
 import { AudioPipeline } from './audio-pipeline.js';
+import { DriftCorrector } from './drift-corrector.js';
 import { MasterClock } from './master-clock.js';
 import { Scheduler } from './scheduler.js';
 import { SourceBranch } from './source-branch.js';
 import { TransportPipeline } from './transport-pipeline.js';
 import { Emitter } from './events.js';
 import { mediaError } from './errors.js';
+import { drawOrClose } from './render-surface.js';
 import { asMediaError, schemeOf } from './plugin-utils.js';
 import { Pump } from './pump.js';
 import type { Player, PlayerEvents, PlayerOptions, PlayerState, PlayerStats } from './types.js';
@@ -33,6 +35,7 @@ export class Engine implements Player {
   private readonly scheduler: Scheduler;
   private readonly pump: Pump;
   private readonly masterClock: MasterClock;
+  private readonly driftCorrector = new DriftCorrector();
   private readonly errors: MediaErrorInfo[] = [];
   private readonly pipeline: TransportPipeline;
   private readonly sourceBranch = new SourceBranch();
@@ -54,58 +57,50 @@ export class Engine implements Player {
     this.audioPipeline = new AudioPipeline({
       enabled: options.audio !== false,
       decoderFactory: audioDecoderFactory ?? nativeAudioDecoderFactory,
-      onFirstAudio: (output) => {
-        this.masterClock.attachAudio(output);
-        this.scheduler.resync();
-      },
+      onFirstAudio: (output) => { this.masterClock.attachAudio(output); this.scheduler.resync(); },
       onError: (info) => this.handleError(info),
     });
     this.decoder.onError((info) => this.handleError(info));
     this.scheduler = new Scheduler(this.decoder, options.renderer, {
       now: () => this.masterClock.nowMs(),
-      onFrame: (frame, ptsUs) => this.emitter.emit('frame', { frame, ptsUs }),
+      onFrame: (frame, ptsUs) => {
+        this.emitter.emit('frame', { frame, ptsUs });
+        this.observeDrift(ptsUs);
+      },
       onError: (info) => this.handleError(info),
+      stallThresholdMs: options.qos?.stallThresholdMs,
+      fatalStallMs: options.qos?.fatalStallMs,
+      onStalled: () => this.emitter.emit('stalled', { stats: this.getStats() }),
+      onFatalStall: (info) => this.handleError(info),
     });
     this.pump = new Pump(() => this.scheduler.tick(), { drivers: options.pump });
     this.pipeline = new TransportPipeline({
       demuxerEvent: (event) => this.handleDemuxerEvent(event),
-      onOpen: () => {
-        if (this.state === 'connecting') {
-          this.setState('playing');
-        }
-      },
+      onOpen: () => { if (this.state === 'connecting') this.setState('playing'); },
       onClose: () => this.handlePipelineClose(),
       onError: (info) => this.handleError(info),
     });
   }
 
   play(): void {
-    if (this.destroyed) {
-      return;
-    }
+    if (this.destroyed) return;
     if (this.state === 'paused') {
       this.startPump();
       this.setState('playing');
       return;
     }
-    if (this.state === 'idle' || this.state === 'error' || this.state === 'stopped') {
-      this.start();
-    }
+    if (this.state === 'idle' || this.state === 'error' || this.state === 'stopped') this.start();
   }
 
   pause(): void {
-    if (this.state !== 'playing' && this.state !== 'connecting') {
-      return;
-    }
+    if (this.state !== 'playing' && this.state !== 'connecting') return;
     // v0.2: pause stops the pump and state only; the source keeps buffering.
     this.stopPump();
     this.setState('paused');
   }
 
   destroy(): void {
-    if (this.destroyed) {
-      return;
-    }
+    if (this.destroyed) return;
     this.destroyed = true;
     this.stopPump();
     this.pump.destroy();
@@ -129,14 +124,26 @@ export class Engine implements Player {
       framesDropped: s.framesDropped,
       fps: s.fps,
       audioFramesDecoded: this.audioPipeline.decodedFrameCount,
+      avOffsetMs: this.driftCorrector.avOffsetMs(),
       errors: [...this.errors],
+      stalledCount: s.stalledCount,
+      rebufferMs: s.rebufferMs,
+      currentBufferMs: s.currentBufferMs,
     };
   }
 
-  private start(): void {
-    if (this.state === 'connecting' || this.state === 'playing') {
-      return;
+  /** Feeds one (audio media time, video PTS) drift sample per frame, resyncing past threshold. */
+  private observeDrift(ptsUs: number): void {
+    if (!this.masterClock.audioActive()) return;
+    this.driftCorrector.observe(this.masterClock.nowUs(), ptsUs);
+    if (this.driftCorrector.needsResync()) {
+      this.scheduler.resync();
+      this.driftCorrector.reset();
     }
+  }
+
+  private start(): void {
+    if (this.state === 'connecting' || this.state === 'playing') return;
     this.setState('connecting');
     if (!this.pluginsRegistered) {
       for (const plugin of this.options.plugins) {
@@ -175,19 +182,14 @@ export class Engine implements Player {
       this.handleError(mediaError('UNSUPPORTED', `no transport plugin for url scheme "${scheme}"`));
       return;
     }
-    if (!this.pipeline.start(transportPlugin, demuxerPlugin, this.options.url)) {
-      // A plugin create() failed; the pipeline already surfaced the error.
-      return;
-    }
+    if (!this.pipeline.start(transportPlugin, demuxerPlugin, this.options.url)) return;
     this.startPump();
   }
 
   private startWithSource(sourcePlugin: SourcePlugin): void {
     try {
       this.sourceBranch.connect(
-        sourcePlugin,
-        this.options.url,
-        this.options.sourceOptions,
+        sourcePlugin, this.options.url, this.options.sourceOptions,
         (event) => this.handleDemuxerEvent(event),
       );
     } catch (error) {
@@ -235,18 +237,7 @@ export class Engine implements Player {
         break;
       case 'frame':
         this.directFrames++;
-        if (this.options.renderer !== null) {
-          try {
-            this.options.renderer.draw(event.frame);
-          } catch (error) {
-            // Mirror the scheduler's decoder-output path: a throwing renderer
-            // must surface as a RENDERER error, never escape the source loop.
-            const message = error instanceof Error ? error.message : 'renderer draw failed';
-            this.handleError(mediaError('RENDERER', message));
-          }
-        } else {
-          event.frame.close();
-        }
+        drawOrClose(this.options.renderer, event.frame, (info) => this.handleError(info));
         break;
       case 'error':
         this.handleError(event.error);
@@ -255,9 +246,7 @@ export class Engine implements Player {
   }
 
   private handleError(info: MediaErrorInfo): void {
-    if (this.state === 'error') {
-      return;
-    }
+    if (this.state === 'error') return;
     this.errors.push(info);
     this.stopPump();
     this.pipeline.teardown();

@@ -24,6 +24,9 @@ function makeScheduler(
     latencyBudgetMs?: number;
     now?: () => number;
     onError?: (info: MediaErrorInfo) => void;
+    stallThresholdMs?: number;
+    fatalStallMs?: number;
+    onStalled?: () => void;
   } = {},
 ) {
   let fake: FakeVideoDecoder | null = null;
@@ -198,5 +201,97 @@ describe('Scheduler', () => {
     scheduler.tick();
     expect(scheduler.getStats().framesDropped).toBe(1);
     expect(scheduler.getStats().framesDecoded).toBe(2);
+  });
+
+  it('declares a stall episode once data dries up past stallThresholdMs and accumulates rebufferMs', () => {
+    let nowMs = 0;
+    const onStalled = vi.fn();
+    const { scheduler } = makeScheduler(fakeRenderer(), {
+      now: () => nowMs,
+      stallThresholdMs: 100,
+      fatalStallMs: 10_000,
+      onStalled,
+    });
+    scheduler.enqueue(chunk(1000));
+    scheduler.tick(); // decodes the chunk; last data activity at now = 0
+    nowMs = 150;
+    scheduler.tick(); // idle past the threshold: episode 1 starts
+    nowMs = 250;
+    scheduler.tick(); // episode continues; rebuffer accrues between ticks
+    const stats = scheduler.getStats();
+    expect(onStalled).toHaveBeenCalledTimes(1);
+    expect(stats.stalledCount).toBe(1);
+    expect(stats.rebufferMs).toBeGreaterThan(0);
+    expect(stats.rebufferMs).toBe(100);
+  });
+
+  it('clears a stall episode when data resumes and counts a second episode later', () => {
+    let nowMs = 0;
+    const onStalled = vi.fn();
+    const { scheduler } = makeScheduler(fakeRenderer(), {
+      now: () => nowMs,
+      stallThresholdMs: 100,
+      fatalStallMs: 10_000,
+      onStalled,
+    });
+    scheduler.enqueue(chunk(1000));
+    scheduler.tick(); // decode at now = 0
+    nowMs = 150;
+    scheduler.tick(); // episode 1 starts
+    expect(scheduler.getStats().stalledCount).toBe(1);
+    nowMs = 200;
+    scheduler.enqueue(chunk(2000)); // data resumes; the episode clears
+    nowMs = 250;
+    scheduler.tick(); // decodes chunk(2000); gap since last data is 0
+    expect(scheduler.getStats().stalledCount).toBe(1);
+    nowMs = 400;
+    scheduler.tick(); // idle past the threshold again: episode 2
+    expect(scheduler.getStats().stalledCount).toBe(2);
+    expect(onStalled).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not declare a stall while the jitter buffer or decoder queue holds data', () => {
+    let nowMs = 0;
+    const onStalled = vi.fn();
+    const { scheduler, getFake } = makeScheduler(fakeRenderer(), {
+      now: () => nowMs,
+      stallThresholdMs: 100,
+      fatalStallMs: 10_000,
+      onStalled,
+    });
+    scheduler.enqueue(chunk(1000));
+    scheduler.enqueue(chunk(2000));
+    nowMs = 500;
+    scheduler.tick(); // decodes chunk(1000); chunk(2000) still buffered
+    expect(onStalled).not.toHaveBeenCalled();
+    scheduler.tick(); // decodes chunk(2000); jitter now empty
+    getFake()!.decodeQueueSize = 5; // decoder still busy draining
+    nowMs = 1000;
+    scheduler.tick();
+    expect(onStalled).not.toHaveBeenCalled();
+    expect(scheduler.getStats().stalledCount).toBe(0);
+  });
+
+  it('currentBufferMs reflects the head-to-tail pts span of the jitter buffer', () => {
+    const { scheduler } = makeScheduler(fakeRenderer(), { now: () => 0 });
+    expect(scheduler.getStats().currentBufferMs).toBe(0);
+    scheduler.enqueue(chunk(1_000_000));
+    scheduler.enqueue(chunk(3_000_000));
+    expect(scheduler.getStats().currentBufferMs).toBe(2000);
+    scheduler.tick(); // consumes the head
+    expect(scheduler.getStats().currentBufferMs).toBe(0);
+    scheduler.tick(); // drains the tail
+    expect(scheduler.getStats().currentBufferMs).toBe(0);
+    scheduler.enqueue(chunk(5_000_000));
+    scheduler.enqueue(chunk(5_000_000));
+    expect(scheduler.getStats().currentBufferMs).toBe(0);
+  });
+
+  it('exposes stalledCount, rebufferMs and currentBufferMs in stats', () => {
+    const { scheduler } = makeScheduler(fakeRenderer(), { now: () => 0 });
+    const stats = scheduler.getStats();
+    expect(stats.stalledCount).toBe(0);
+    expect(stats.rebufferMs).toBe(0);
+    expect(stats.currentBufferMs).toBe(0);
   });
 });

@@ -22,6 +22,12 @@ export interface VideoCodecDecoder {
   reset(): void;
   close(): void;
   readonly queueSize: number;
+  /**
+   * True when no decode work is pending. Optional so out-of-tree soft
+   * decoders need not implement it; consumers (the stall watchdog) treat an
+   * absent decoder as not busy.
+   */
+  readonly idle?: boolean;
   onOutput(cb: (frame: VideoFrame, ptsUs: number) => void): void;
   onError(cb: (info: MediaErrorInfo) => void): void;
 }
@@ -125,6 +131,10 @@ export class VideoDecoderWrapper implements VideoCodecDecoder {
 
   get queueSize(): number {
     return this.decoder === null ? 0 : this.decoder.decodeQueueSize;
+  }
+
+  get idle(): boolean {
+    return this.decoder === null || this.decoder.decodeQueueSize === 0;
   }
 
   get outputSize(): number {

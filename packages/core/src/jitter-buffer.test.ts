@@ -97,6 +97,19 @@ describe('JitterBuffer', () => {
     expect(buffer.next()).toBeUndefined();
   });
 
+  it('tail() returns the last item in pts order', () => {
+    const buffer = new JitterBuffer<Item>();
+    buffer.push({ timestamp: 1, id: 'a' });
+    buffer.push({ timestamp: 3, id: 'c' });
+    buffer.push({ timestamp: 2, id: 'b' });
+    expect(buffer.tail()?.id).toBe('c');
+  });
+
+  it('tail() is undefined when empty', () => {
+    const buffer = new JitterBuffer<Item>();
+    expect(buffer.tail()).toBeUndefined();
+  });
+
   it('clear empties the buffer', () => {
     const buffer = new JitterBuffer<Item>();
     buffer.push({ timestamp: 1, id: 'a' });

@@ -120,13 +120,30 @@
         overflow-y: auto;
         color: #f85149;
       }
+
+      #multiview {
+        width: 640px;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      #multiview canvas {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        display: block;
+      }
     </style>
   </head>
   <body>
     <header>
       <h1>vigilkit demo</h1>
       <p class="subtitle">
-        FLV over WebSocket · HLS · WHEP · HEVC soft-decode · FLV over WebSocket 实时播放
+        FLV over WebSocket · HLS · WHEP · HEVC soft-decode · Multi-view baseline 实时播放
         — mode: <span id="mode">-</span>
       </p>
     </header>
@@ -135,16 +152,22 @@
       <canvas id="screen" width="640" height="360"></canvas>
     </div>
 
-    <div class="controls">
-      <button id="connect" type="button">Connect / 连接</button>
-      <button id="disconnect" type="button" disabled>Disconnect / 断开</button>
-    </div>
+    <div id="multiview"></div>
 
     <div class="readout">
       <div><span>status</span> <span class="value" id="status">idle</span></div>
       <div><span>fps</span> <span class="value" id="fps">-</span></div>
       <div><span>frames</span> <span class="value" id="frames">0</span></div>
       <div id="errors"><span>errors</span></div>
+    </div>
+
+    <div class="readout">
+      <div><span>multiview</span> <span class="value" id="multiview-status">idle</span></div>
+    </div>
+
+    <div class="controls">
+      <button id="connect" type="button">Connect / 连接</button>
+      <button id="disconnect" type="button" disabled>Disconnect / 断开</button>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

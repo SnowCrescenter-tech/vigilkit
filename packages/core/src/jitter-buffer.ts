@@ -46,6 +46,11 @@ export class JitterBuffer<T extends { timestamp: number }> {
     return this.items[0];
   }
 
+  /** The newest (largest-pts) item, or undefined when empty. */
+  tail(): T | undefined {
+    return this.items[this.items.length - 1];
+  }
+
   get size(): number {
     return this.items.length;
   }

@@ -10,12 +10,18 @@
 # Usage:
 #   docker compose -f examples/basic/docker-compose.yml up -d mediamtx
 #
-# Then point an RTSP camera at rtsp://localhost:8554/<camera-name> and check
-# the stream via the API at http://localhost:8888 (paths list endpoints).
+# Then point an RTSP camera at rtsp://localhost:8554/<camera-name>. The stream
+# is published as HLS at http://localhost:8888/<stream> (HLS is on by default;
+# the HTTP API is not exposed). WebRTC egress runs on port 8889:
+#   http://localhost:8889/<stream>/whep   (WHEP)
+#   http://localhost:8889/<stream>/whip   (WHIP)
+# with ICE/UDP media on 8189/udp.
 services:
   mediamtx:
     image: bluenviron/mediamtx:latest
     restart: unless-stopped
     ports:
       - "8554:8554" # RTSP (camera input)
-      - "8888:8888" # HTTP API (paths list / health)
+      - "8888:8888" # HLS (http://localhost:8888/<stream>)
+      - "8889:8889" # WebRTC / WHEP / WHIP (http://localhost:8889/<stream>/whep)
+      - "8189:8189/udp" # ICE / WebRTC media (UDP)

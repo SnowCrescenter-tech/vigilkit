@@ -1,6 +1,14 @@
+/**
+ * Media error taxonomy. 'NETWORK' is reserved for future network-failure
+ * classification (connection-level outages distinct from a stalled pipeline);
+ * no code path emits it yet. 'STALLED' comes from the core QoS watchdog when a
+ * stall episode outlives `PlayerOptions.qos.fatalStallMs`, and 'TIMEOUT' from
+ * a connect that never opened within the transport pipeline's connect window.
+ */
 export type MediaErrorCode =
   | 'TRANSPORT' | 'DEMUX' | 'DEMUX_BAD_SIGNATURE' | 'DEMUX_MISSING_SEQUENCE_HEADER'
-  | 'DECODE' | 'BUFFER_OVERFLOW' | 'RENDERER' | 'PLUGIN_COLLISION' | 'UNSUPPORTED';
+  | 'DECODE' | 'BUFFER_OVERFLOW' | 'RENDERER' | 'PLUGIN_COLLISION' | 'UNSUPPORTED'
+  | 'STALLED' | 'NETWORK' | 'TIMEOUT';
 
 export interface MediaErrorInfo { code: MediaErrorCode; message: string; }
 

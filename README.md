@@ -9,6 +9,35 @@
 
 vigilkit is an open-source (Apache-2.0), WebCodecs-first, plugin-based web video player SDK for surveillance and IoT video. The core engine has zero third-party runtime dependencies. A microkernel wires transport plugins, source plugins, and demuxer plugins into a single decode pipeline: H.264 frames are decoded with the browser's native WebCodecs hardware decoder and drawn through WebGPU (zero-copy `importExternalTexture`), WebGL2, or canvas2d, whichever the browser supports. HEVC plays through WebCodecs where hardware decode exists, and through a WASM soft-decode fallback everywhere else, which is how Firefox gets HEVC. AAC audio decodes through WebCodecs `AudioDecoder` and is scheduled ahead on a WebAudio sink with audio-master A/V sync, and the WHEP source plugin brings WebRTC egress streams in as direct frames. Everything runs in the browser, and it is built for low-latency, multi-stream surveillance and IoT dashboards.
 
+## Install from npm
+
+All packages are published on npm. Install the engine plus the plugins you need:
+
+```sh
+npm install vigilkit @vigilkit/plugin-flv @vigilkit/plugin-ws @vigilkit/renderer
+# or pnpm add / yarn add
+```
+
+Basic usage:
+
+```ts
+import { createPlayer } from 'vigilkit';
+import { flvDemuxerPlugin } from '@vigilkit/plugin-flv';
+import { wsTransportPlugin } from '@vigilkit/plugin-ws';
+import { createRenderer } from '@vigilkit/renderer';
+
+const player = createPlayer({
+  url: 'ws://your-server/live',
+  demuxer: 'flv',
+  plugins: [wsTransportPlugin(), flvDemuxerPlugin()],
+  renderer: createRenderer(canvas), // a <canvas> element
+});
+
+player.play();
+```
+
+> **Note:** all packages are **ESM-only**. Tooling (bundlers, dev servers) requires Node.js 20+; the browser needs WebCodecs plus WebGPU, WebGL2, or canvas2d for rendering.
+
 ## Zero telemetry
 
 **vigilkit collects no telemetry. No analytics, no tracking, no usage counters, no beacons.** All code runs in the browser, and vigilkit never makes a network call other than the stream URL your application asks it to connect to. There is no vigilkit-operated server, no phone-home endpoint, and no data leaves your page.

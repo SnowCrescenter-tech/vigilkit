@@ -130,6 +130,13 @@ export class CodecRoutingDecoder implements VideoCodecDecoder {
     return this.pending.length + 1;
   }
 
+  get idle(): boolean {
+    if (this.impl !== null) {
+      return this.impl.queueSize === 0;
+    }
+    return this.pending.length === 0;
+  }
+
   onOutput(cb: (frame: VideoFrame, ptsUs: number) => void): void {
     this.outputCb = cb;
     if (this.impl !== null) {

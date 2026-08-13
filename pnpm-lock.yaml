@@ -73,7 +73,11 @@ importers:
         specifier: workspace:*
         version: link:../plugin-sdk
 
-  packages/media-utils: {}
+  packages/media-utils:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
 
   packages/plugin-sdk: {}
 
@@ -92,6 +96,9 @@ importers:
 
   packages/plugins/hevc-wasm:
     dependencies:
+      '@vigilkit/media-utils':
+        specifier: workspace:*
+        version: link:../../media-utils
       '@vigilkit/plugin-sdk':
         specifier: workspace:*
         version: link:../../plugin-sdk
