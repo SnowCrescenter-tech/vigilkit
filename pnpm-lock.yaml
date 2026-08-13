@@ -81,6 +81,19 @@ importers:
 
   packages/plugin-sdk: {}
 
+  packages/plugins/dav1d-wasm:
+    dependencies:
+      '@vigilkit/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+      vigilkit:
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+
   packages/plugins/flv:
     dependencies:
       '@vigilkit/media-utils':
@@ -125,6 +138,9 @@ importers:
 
   packages/plugins/whep:
     dependencies:
+      '@vigilkit/media-utils':
+        specifier: workspace:*
+        version: link:../../media-utils
       '@vigilkit/plugin-sdk':
         specifier: workspace:*
         version: link:../../plugin-sdk

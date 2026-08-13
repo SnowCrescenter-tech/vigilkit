@@ -61,8 +61,14 @@ export class FakeRtc {
     this.localDescription = { type: desc.type, sdp: desc.sdp ?? '' } as RTCSessionDescription;
   });
   readonly setRemoteDescription = vi.fn(async (_desc: RTCSessionDescriptionInit) => {});
+  readonly addTransceiver = vi.fn((_trackOrKind: string | MediaStreamTrack, _init?: RTCRtpTransceiverInit) => {
+    return {} as RTCRtpTransceiver;
+  });
+  readonly receivers: Array<{ track: MediaStreamTrack; transform: RTCRtpTransform | null }> = [];
+  readonly getReceivers = vi.fn(() => this.receivers);
 
   emitTrack(track: MediaStreamTrack): void {
+    this.receivers.push({ track, transform: null });
     this.ontrack?.({ track });
   }
 

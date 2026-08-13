@@ -15,6 +15,14 @@ import {
   makeFetch,
   makeSource,
 } from './whep-test-fixtures.js';
+import {
+  ENCODED_ANSWER_SDP,
+  IDR,
+  PPS,
+  SPS,
+  annexB,
+  makeEncodedSource,
+} from './whep-encoded-fixtures.js';
 import { WhepSource } from './whep-source.js';
 import { whepSourcePlugin } from './plugin.js';
 
@@ -39,6 +47,9 @@ function errorEvents(events: DemuxerEvent[]): Array<{ code: string; message: str
     .filter((event) => event.type === 'error')
     .map((event) => (event as { type: 'error'; error: { code: string; message: string } }).error);
 }
+
+type SeqEvent = Extract<DemuxerEvent, { type: 'sequence-header' }>;
+type VideoEvent = Extract<DemuxerEvent, { type: 'video' }>;
 
 describe('WhepSource', () => {
   it('answers a server counter-offer (406): POST offer, adopt SDP, createAnswer, PATCH the answer, then trickle candidates', async () => {
@@ -162,6 +173,92 @@ describe('WhepSource', () => {
     reader.pushFrame(new FakeFrame(2));
     await flush();
     expect(frameEvents(events)).toHaveLength(1);
+  });
+});
+
+describe('WhepSource encoded mode (insertable streams)', () => {
+  it('adds recvonly audio and video transceivers before creating the offer', async () => {
+    const { fetchImpl } = makeFetch({ postStatus: 201 });
+    const { source, rtc } = makeEncodedSource(fetchImpl);
+    source.start();
+    await flush();
+
+    expect(rtc.addTransceiver).toHaveBeenCalledWith('video', { direction: 'recvonly' });
+    expect(rtc.addTransceiver).toHaveBeenCalledWith('audio', { direction: 'recvonly' });
+    expect(rtc.createOffer).toHaveBeenCalledOnce();
+    source.stop();
+  });
+
+  it('wires an RTCRtpScriptTransform on the receiver and routes worker messages through the assembler', async () => {
+    const { fetchImpl } = makeFetch({ postStatus: 201 });
+    const { source, rtc, worker, transform } = makeEncodedSource(fetchImpl);
+    const events = collectEvents(source);
+    source.start();
+    await flush();
+
+    rtc.emitTrack(fakeTrack());
+    expect(rtc.receivers[0]?.transform).toBe(transform);
+    expect(transform.worker).toBe(worker);
+    expect(transform.options).toEqual({ operation: 'encoded' });
+
+    // One access unit with in-band SPS/PPS + IDR keyframe → config + chunk.
+    worker.emitMessage({
+      kind: 'video',
+      type: 'key',
+      metadata: { rtpTimestamp: 90000, payloadType: 96, mimeType: 'video/H264' },
+      data: annexB(SPS, PPS, IDR),
+    });
+    await flush();
+
+    const seq = events.find((event): event is SeqEvent => event.type === 'sequence-header');
+    expect(seq?.config.codec).toBe('avc1.42001f');
+    const video = events.find((event): event is VideoEvent => event.type === 'video');
+    expect(video?.chunk.type).toBe('key');
+    expect(video?.chunk.timestamp).toBe(1_000_000);
+    expect(errorEvents(events)).toHaveLength(0);
+    source.stop();
+  });
+
+  it('emits a sequence-header from the SDP sprop-parameter-sets at connect, before any track', async () => {
+    const { fetchImpl } = makeFetch({ postStatus: 201, answerSdp: ENCODED_ANSWER_SDP });
+    const { source } = makeEncodedSource(fetchImpl);
+    const events = collectEvents(source);
+    source.start();
+    await flush();
+
+    const seq = events.find((event): event is SeqEvent => event.type === 'sequence-header');
+    expect(seq?.config.codec).toBe('avc1.42001f');
+    expect(seq?.config.description).toBeDefined();
+    // audio-config is deferred to the first audio frame, not emitted at connect.
+    expect(events.some((event) => event.type === 'audio-config')).toBe(false);
+    source.stop();
+  });
+
+  it('stop() terminates the worker and detaches the receiver transform', async () => {
+    const { fetchImpl } = makeFetch({ postStatus: 201 });
+    const { source, rtc, worker } = makeEncodedSource(fetchImpl);
+    source.start();
+    await flush();
+    rtc.emitTrack(fakeTrack());
+
+    source.stop();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(rtc.receivers[0]?.transform).toBeNull();
+  });
+
+  it('never uses MediaStreamTrackProcessor in encoded mode', async () => {
+    const { fetchImpl } = makeFetch({ postStatus: 201 });
+    const { source, rtc } = makeEncodedSource(fetchImpl);
+    const events = collectEvents(source);
+    source.start();
+    await flush();
+    rtc.emitTrack(fakeTrack());
+    await flush();
+
+    expect(rtc.receivers[0]?.transform).toBeDefined();
+    // Frames flow via worker messages, not the processor's decoded frames.
+    expect(frameEvents(events)).toHaveLength(0);
+    source.stop();
   });
 });
 
