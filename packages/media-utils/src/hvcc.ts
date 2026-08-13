@@ -101,7 +101,6 @@ export function parseHvcC(hvcC: Uint8Array): HvcCParsed {
     throw formatError(`malformed hvcC: configurationVersion ${configurationVersion}`);
   }
   const byte1 = reader.readU8();
-  const generalProfileSpace = byte1 >> 6;
   const generalTierFlag = (byte1 >> 5) & 1;
   const generalProfileIdc = byte1 & 0x1f;
   const generalProfileCompatibilityFlags = reader.readU32();

@@ -1,4 +1,5 @@
 import type { EncodedVideoChunkData, MediaErrorCode, MediaErrorInfo } from '@vigilkit/plugin-sdk';
+import { parseHvcC } from '@vigilkit/media-utils';
 import type { VideoCodecDecoder } from 'vigilkit';
 import type {
   Libde265Decoder,
@@ -6,6 +7,7 @@ import type {
   Libde265ImagePlane,
   Libde265Module,
 } from './libde265-loader.js';
+import { annexBFrame, asUint8Array, chunkFramingToAnnexB, concatBytes, selfDelimitingAnnexB } from './hevc-framing.js';
 import { yuvToRgba } from './yuv-to-rgba.js';
 
 const HEVC_CODEC = /^(hvc1|hev1|hevc)/i;
@@ -15,10 +17,14 @@ const HEVC_CODEC = /^(hvc1|hev1|hevc)/i;
  * vigilkit's `VideoCodecDecoder` contract so the core routing decoder can use
  * it as a drop-in soft backend.
  *
- * Stream contract: `decode()` must receive Annex-B HEVC elementary stream
- * bytes (00 00 01 start codes). libde265 parses VPS/SPS/PPS from the stream
- * itself, so `configure()` only validates the codec. The FLV HEVC and TS HEVC
- * demuxer paths are v0.3.
+ * Stream contract: `decode()` must receive an HEVC elementary stream in
+ * Annex-B framing (00 00 01 start codes). Demuxer output (FLV Enhanced-RTMP
+ * and TS stream_type 0x24) arrives 4-byte length-prefixed and is converted
+ * here; Annex-B input (the raw-ES demo path) passes through unchanged.
+ * `configure()` validates the codec and, when the config carries an hvcC
+ * `description`, extracts its VPS/SPS/PPS and prepends them to the first
+ * pushed chunk — demuxers emit only slice NALUs, and libde265 cannot decode
+ * without the parameter sets.
  *
  * Worker note: libde265 decode is compute-intensive and synchronous; run the
  * whole plugin in a Web Worker in production to avoid blocking the main thread.
@@ -30,6 +36,11 @@ export class HevcSoftDecoder implements VideoCodecDecoder {
   private errorCb: ((info: MediaErrorInfo) => void) | null = null;
   private pending = 0;
   private closed = false;
+  /** Annex-B framed VPS/SPS/PPS from the hvcC description (null when absent). */
+  private parameterSets: Uint8Array | null = null;
+  private paramsPushed = false;
+  /** True once any chunk reached pushData (first keyframe must not flush). */
+  private hasPushed = false;
 
   constructor(module: Libde265Module) {
     this.module = module;
@@ -47,9 +58,27 @@ export class HevcSoftDecoder implements VideoCodecDecoder {
   configure(config: VideoDecoderConfig): void {
     if (!HEVC_CODEC.test(config.codec)) {
       this.fail('UNSUPPORTED', `not an HEVC codec: ${config.codec}`);
+      return;
     }
-    // libde265 parses VPS/SPS/PPS from the Annex-B stream itself; there is no
-    // codec-specific configuration to apply.
+    this.parameterSets = null;
+    this.paramsPushed = false;
+    this.hasPushed = false;
+    // Demuxer output carries only slice NALUs: the VPS/SPS/PPS live in the
+    // hvcC `description` (FLV SequenceStart / TS parameter-set PES) and must
+    // be prepended to the stream, or libde265 cannot decode the slices.
+    if (config.description !== undefined) {
+      try {
+        const nalus = parseHvcC(asUint8Array(config.description)).arrays.flatMap((array) => array.nalus);
+        if (nalus.length > 0) {
+          this.parameterSets = annexBFrame(nalus);
+        }
+      } catch (error) {
+        this.fail(
+          'UNSUPPORTED',
+          `malformed hvcC description: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   decode(chunk: EncodedVideoChunkData): void {
@@ -57,7 +86,37 @@ export class HevcSoftDecoder implements VideoCodecDecoder {
       return;
     }
     this.pending++;
-    const pushError = this.decoder.pushData(chunk.data, BigInt(chunk.timestamp));
+    let data = chunkFramingToAnnexB(chunk.data);
+    if (this.parameterSets !== null && !this.paramsPushed) {
+      this.paramsPushed = true;
+      data = concatBytes(this.parameterSets, data);
+    }
+    // Every pushed buffer must be self-delimiting (begin with a complete
+    // start code): the raw-ES demo path splits Annex-B AT start codes, so
+    // its chunks begin mid-start-code (`00 00 00` or `01`). After the
+    // decoder is flushed, a mid-start-code chunk would misalign libde265's
+    // NAL-boundary tracking.
+    data = selfDelimitingAnnexB(data);
+    // libde265 releases decoded pictures only when the decoder is flushed,
+    // and the engine never flushes mid-stream — so nothing would ever reach
+    // the renderer. Force the previous access unit out before every push
+    // instead: flushData() outputs all buffered pictures while the decoder
+    // keeps them available as references (verified: inter pictures decode
+    // cleanly after a flush), keeping `pending` near zero so the scheduler's
+    // backpressure never stalls the pipeline.
+    if (this.hasPushed) {
+      const flushError = this.decoder.flushData();
+      if (!this.module.isOk(flushError)) {
+        this.fail('DECODE', this.errorText(flushError));
+        return;
+      }
+      this.drain();
+    }
+    this.hasPushed = true;
+    // Demuxer timestamps are µs doubles; the HLS TS demuxer's PTS
+    // discontinuity offset can yield fractional values (e.g. synthetic
+    // 30 fps spacing), which BigInt() rejects — round to the nearest µs.
+    const pushError = this.decoder.pushData(data, BigInt(Math.round(chunk.timestamp)));
     if (!this.module.isOk(pushError)) {
       this.fail('DECODE', this.errorText(pushError));
       return;
@@ -84,6 +143,10 @@ export class HevcSoftDecoder implements VideoCodecDecoder {
   reset(): void {
     this.pending = 0;
     this.decoder.reset();
+    // libde265's reset drops its parameter-set state; the next chunk must
+    // carry the VPS/SPS/PPS again.
+    this.paramsPushed = false;
+    this.hasPushed = false;
   }
 
   close(): void {

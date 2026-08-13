@@ -96,6 +96,9 @@ importers:
 
   packages/plugins/hevc-wasm:
     dependencies:
+      '@vigilkit/media-utils':
+        specifier: workspace:*
+        version: link:../../media-utils
       '@vigilkit/plugin-sdk':
         specifier: workspace:*
         version: link:../../plugin-sdk

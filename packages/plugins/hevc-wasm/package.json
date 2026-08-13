@@ -23,6 +23,7 @@
                     "smoke":  "node scripts/smoke.mjs"
                 },
     "dependencies":  {
+                         "@vigilkit/media-utils":  "workspace:*",
                          "@vigilkit/plugin-sdk":  "workspace:*",
                          "vigilkit":  "workspace:*"
                      },
