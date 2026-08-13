@@ -11,7 +11,7 @@
 // soft decoder, which converts the length-prefixed chunks to Annex-B.
 //
 // The media playlist examples/basic/hls-fixtures/hevc.m3u8 lists the segment
-// hevc-seg-0.ts 10 times (VOD), so a single play fetches the segment 10
+// hevc-seg-0..9.ts (10 committed segments) (VOD), so a single play fetches the segment 10
 // times (~10 frames each; the shared TsDemuxer's PTS-discontinuity offset
 // keeps timestamps monotonic across segments). ~100 frames per play is far
 // above the 30-frame floor.

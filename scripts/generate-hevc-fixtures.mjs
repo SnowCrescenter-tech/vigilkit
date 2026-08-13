@@ -384,20 +384,27 @@ async function verifyTs() {
   console.log(`TS codec:  ${seq.config.codec}`);
 }
 
-const { codec, frames, bytes } = buildFlv();
-console.log(`source: ${inputPath}`);
-console.log(`target: ${outputPath}`);
-console.log(`codec:  ${codec}`);
-console.log(`frames: ${frames} VCL access units`);
-console.log(`size:   ${bytes} bytes`);
+const isVerify = process.argv.includes('--verify') || process.argv.includes('--verify-ts');
 
-const tsInfo = buildTs();
-console.log(`ts-target:   ${TS_OUTPUT} (${tsInfo.bytes} bytes, ${tsInfo.frames} access units)`);
-console.log(`ts-playlist: ${M3U8_OUTPUT}`);
+if (isVerify) {
+  // Verify modes must NOT rewrite committed fixtures: they validate the
+  // existing on-disk files (the generator's output diverges from the
+  // committed playlist — hevc-seg-0..9 in the repo, seg-0×10 in buildTs()).
+  if (process.argv.includes('--verify-ts') || process.argv.includes('--verify')) {
+    await verifyTs();
+  }
+  if (process.argv.includes('--verify')) {
+    await verify();
+  }
+} else {
+  const { codec, frames, bytes } = buildFlv();
+  console.log(`source: ${inputPath}`);
+  console.log(`target: ${outputPath}`);
+  console.log(`codec:  ${codec}`);
+  console.log(`frames: ${frames} VCL access units`);
+  console.log(`size:   ${bytes} bytes`);
 
-if (process.argv.includes('--verify-ts')) {
-  await verifyTs();
-} else if (process.argv.includes('--verify')) {
-  await verifyTs();
-  await verify();
+  const tsInfo = buildTs();
+  console.log(`ts-target:   ${TS_OUTPUT} (${tsInfo.bytes} bytes, ${tsInfo.frames} access units)`);
+  console.log(`ts-playlist: ${M3U8_OUTPUT}`);
 }
