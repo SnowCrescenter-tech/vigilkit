@@ -1,5 +1,4 @@
 import type { DemuxerEvent, MediaSource, SourceOptions } from '@vigilkit/plugin-sdk';
-import type { EncodedPipelineOptions } from './whep-encoded-pipeline.js';
 import { EncodedMediaPipeline } from './whep-encoded-pipeline.js';
 import { hasVideoMedia, resolvePatchUrl } from './whep-sdp.js';
 
