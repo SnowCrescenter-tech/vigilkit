@@ -1,5 +1,6 @@
 // Test-only helpers for crafting synthetic FLV buffers. Not a test file and
 // not exported from the package entry, so it never ships.
+import { buildHvcC } from '@vigilkit/media-utils';
 import type { Demuxer, DemuxerEvent } from '@vigilkit/plugin-sdk';
 
 export const AVC_CONFIG = new Uint8Array([
@@ -106,4 +107,72 @@ export function collect(demuxer: Demuxer): DemuxerEvent[] {
   const events: DemuxerEvent[] = [];
   demuxer.onEvent((event) => events.push(event));
   return events;
+}
+
+// --- Enhanced-RTMP HEVC helpers -------------------------------------------------
+
+/** FourCC 'hvc1' marking an Enhanced-RTMP HEVC video packet. */
+export const HEVC_FOURCC = new TextEncoder().encode('hvc1');
+
+// Synthetic HEVC parameter sets (same as the media-utils A0 fixtures):
+// profile 1 / tier 0 / level 93, compatibility 0x60000000, constraint ...B0.
+export const HEVC_VPS = new Uint8Array([
+  0x40, 0x01, // NAL header: VPS (type 32)
+  0x00, 0x01, // id=0, max_layers_minus1=0, max_sub_layers_minus1=0, nesting=1
+  0xff, 0xff, // vps_reserved_0xffff_16bits
+  0x01, // general_profile_space=0, tier=0, profile_idc=1
+  0x60, 0x00, 0x00, 0x00, // general_profile_compatibility_flags
+  0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, // general_constraint_indicator_flags
+  0x5d, // general_level_idc = 93
+]);
+export const HEVC_SPS = new Uint8Array([
+  0x42, 0x01, // NAL header: SPS (type 33)
+  0x01, // id=0, max_sub_layers_minus1=0, temporal_id_nesting_flag=1
+  0x01, // general_profile_space=0, tier=0, profile_idc=1
+  0x60, 0x00, 0x00, 0x00, // general_profile_compatibility_flags
+  0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, // general_constraint_indicator_flags
+  0x5d, // general_level_idc = 93
+  0xa0, 0x88, 0x45, 0x80, // sps_id=0, chroma 4:2:0, 16x16, trailing bits
+]);
+export const HEVC_PPS = new Uint8Array([0x44, 0x01, 0x00, 0x00, 0x00]);
+/** The hvcC record the synthetic parameter sets build to. */
+export const HEVC_HVCC = buildHvcC({ vps: HEVC_VPS, sps: HEVC_SPS, pps: HEVC_PPS });
+
+/** Length-prefixed VCL NALU payload (4-byte length + type-19 IDR NAL header). */
+export const HEVC_NALUS = concat(new Uint8Array(u32(4)), new Uint8Array([0x27, 0x01, 0x00, 0x01]));
+
+/** Enhanced-RTMP HEVC SequenceStart tag: box-wrapped by default, raw on demand. */
+export function hevcSeqTag(record: Uint8Array, timestamp = 0, boxWrapped = true): Uint8Array {
+  const box = boxWrapped
+    ? concat(new Uint8Array(u32(4 + record.length)), new TextEncoder().encode('hvcc'), record)
+    : record;
+  const payload = new Uint8Array(6 + box.length);
+  payload[0] = 0x10; // frameType=1 key, packetType=0 SequenceStart
+  payload[1] = 0x80; // IsExHeader
+  payload.set(HEVC_FOURCC, 2);
+  payload.set(box, 6);
+  return craftTag(9, payload, timestamp);
+}
+
+/** Enhanced-RTMP HEVC CodedFrames tag: SI24 CTS (0) + length-prefixed NALUs. */
+export function hevcCodedFramesTag(
+  naluPayload: Uint8Array,
+  frameType = 1,
+  timestamp = 0,
+  packetType = 1,
+): Uint8Array {
+  const payload = new Uint8Array(6 + 3 + naluPayload.length);
+  payload[0] = ((frameType & 0x0f) << 4) | (packetType & 0x0f);
+  payload[1] = 0x80; // IsExHeader
+  payload.set(HEVC_FOURCC, 2);
+  payload.set(naluPayload, 9);
+  return craftTag(9, payload, timestamp);
+}
+
+/** Legacy (non-enhanced) codecId 12 video tag: AVC-style header layout. */
+export function legacyHevcTag(): Uint8Array {
+  const payload = new Uint8Array(5);
+  payload[0] = 0x1c; // frameType=1 key, codecId=12 HEVC
+  payload[1] = 0x00; // AVC-style packet type = sequence header
+  return craftTag(9, payload);
 }

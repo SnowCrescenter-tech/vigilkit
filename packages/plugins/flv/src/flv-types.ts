@@ -15,6 +15,18 @@ export const SoundFormat = {
 
 export const VideoCodec = {
   AVC: 7,
+  /** Legacy codecId reserved for HEVC; only valid under Enhanced-RTMP framing. */
+  HEVC: 12,
+} as const;
+
+/** Enhanced-RTMP video packet types (the low nibble of the first header byte). */
+export const EnhancedVideoPacketType = {
+  SEQUENCE_START: 0,
+  CODED_FRAMES: 1,
+  SEQUENCE_END: 2,
+  CODED_FRAMES_X: 3,
+  METADATA: 4,
+  MPEG2TS_SEQUENCE_START: 5,
 } as const;
 
 export const AvcPacketType = {

@@ -1,10 +1,13 @@
-import { ByteReader, MediaFormatError, ascToConfig, parseAvcC } from '@vigilkit/media-utils';
+import { ByteReader, MediaFormatError, ascToConfig, parseAvcC, parseHvcC } from '@vigilkit/media-utils';
 import type { Demuxer, DemuxerEvent, StreamMetadata } from '@vigilkit/plugin-sdk';
 import { parseScriptData } from './amf0.js';
+import { ENHANCED_HEADER_SIZE, parseEnhancedHevcHeader, readSi24Cts, unwrapHvccBox } from './hevc.js';
+import type { EnhancedHevcHeader } from './hevc.js';
 import {
   AacPacketType,
   AvcFrameType,
   AvcPacketType,
+  EnhancedVideoPacketType,
   HEADER_SIZE,
   PREV_TAG_SIZE,
   SoundFormat,
@@ -172,7 +175,19 @@ export class FlvDemuxer implements Demuxer {
     }
     const frameType = (data[0] as number) >> 4;
     const codecId = (data[0] as number) & 0x0f;
+    // Enhanced-RTMP HEVC is identified by the IsExHeader bit + FourCC, not the
+    // legacy codecId nibble (which holds the packet type), so probe it first.
+    const enhanced = parseEnhancedHevcHeader(data);
+    if (enhanced !== null) {
+      this.processEnhancedVideo(data, enhanced, timestampMs);
+      return;
+    }
     if (codecId !== VideoCodec.AVC) {
+      if (codecId === VideoCodec.HEVC) {
+        // codecId 12 without the Enhanced-RTMP header: HEVC is only supported
+        // through Enhanced-RTMP framing.
+        this.emitError('DEMUX', 'unsupported HEVC framing: expected Enhanced-RTMP header');
+      }
       return;
     }
     const packetType = data[1] as number;
@@ -205,6 +220,57 @@ export class FlvDemuxer implements Demuxer {
           data: data.subarray(5),
         },
       });
+    }
+  }
+
+  private processEnhancedVideo(data: Uint8Array, header: EnhancedHevcHeader, timestampMs: number): void {
+    switch (header.packetType) {
+      case EnhancedVideoPacketType.SEQUENCE_START: {
+        // SequenceStart carries an hvcC record (raw or box-wrapped); the config
+        // is self-contained, so nothing beyond hasSeqHeader is retained.
+        const record = unwrapHvccBox(data.subarray(ENHANCED_HEADER_SIZE));
+        if (record === null) {
+          this.emitError('DEMUX', 'malformed HEVC sequence header: no hvcC record');
+          return;
+        }
+        this.hasSeqHeader = true;
+        try {
+          this.emit({ type: 'sequence-header', config: parseHvcC(record) });
+        } catch (error) {
+          this.failOnFormatError(error);
+        }
+        return;
+      }
+      case EnhancedVideoPacketType.CODED_FRAMES: {
+        if (!this.hasSeqHeader) {
+          this.emitError(
+            'DEMUX_MISSING_SEQUENCE_HEADER',
+            'received HEVC coded frames before the sequence header',
+          );
+          return;
+        }
+        const payload = data.subarray(ENHANCED_HEADER_SIZE);
+        if (payload.length < 3) {
+          return;
+        }
+        // The SI24 composition-time offset precedes the length-prefixed NALUs;
+        // the tag timestamp is authoritative, so the offset is read and skipped.
+        readSi24Cts(payload, 0);
+        this.emit({
+          type: 'video',
+          chunk: {
+            type: header.frameType,
+            timestamp: timestampMs * 1000,
+            // The hvcC `description` tells WebCodecs to expect 4-byte
+            // length-prefixed NALUs, matching this raw payload.
+            data: payload.subarray(3),
+          },
+        });
+        return;
+      }
+      default:
+        // SequenceEnd, CodedFramesX, Metadata, MPEG2TSSequenceStart: ignored.
+        return;
     }
   }
 
