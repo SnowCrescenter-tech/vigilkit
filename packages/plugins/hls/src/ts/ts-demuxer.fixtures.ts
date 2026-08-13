@@ -147,6 +147,62 @@ export function deltaAccessUnit(): Uint8Array {
   return concat(annexBNalu(DELTA));
 }
 
+// Synthetic HEVC parameter sets (hand-computed, matching the media-utils
+// hvcc/hevc tests). The two-byte NAL header encodes type in (b0 >> 1) & 0x3F.
+export const HEVC_VPS = new Uint8Array([
+  0x40, 0x01, // NAL header: VPS (type 32), temporal_id_plus1 = 1
+  0x00, 0x01, // id=0, max_layers_minus1=0, max_sub_layers_minus1=0, nesting=1
+  0xff, 0xff, // vps_reserved_0xffff_16bits
+  0x01, // general_profile_space=0, tier=0, profile_idc=1
+  0x60, 0x00, 0x00, 0x00, // general_profile_compatibility_flags
+  0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, // general_constraint_indicator_flags
+  0x5d, // general_level_idc = 93
+]);
+export const HEVC_SPS = new Uint8Array([
+  0x42, 0x01, // NAL header: SPS (type 33)
+  0x01, // id=0, max_sub_layers_minus1=0, temporal_id_nesting_flag=1
+  0x01, // general_profile_space=0, tier=0, profile_idc=1
+  0x60, 0x00, 0x00, 0x00, // general_profile_compatibility_flags
+  0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, // general_constraint_indicator_flags
+  0x5d, // general_level_idc = 93
+  0xa0, 0x88, 0x45, 0x80, // sps_seq_parameter_set_id=0, chroma_format_idc=1, w=16, h=16, rbsp_trailing
+]);
+export const HEVC_PPS = new Uint8Array([0x44, 0x01, 0x00, 0x00, 0x00]);
+export const HEVC_IDR = new Uint8Array([0x26, 0x01, 0x88, 0x84, 0x00, 0x00]); // IDR_W_RADL (type 19)
+const HEVC_DELTA = new Uint8Array([0x02, 0x01, 0x9a, 0x22, 0x10]); // TRAIL_R (type 1)
+
+export function hevcAccessUnit(): Uint8Array {
+  return concat(annexBNalu(HEVC_VPS), annexBNalu(HEVC_SPS), annexBNalu(HEVC_PPS), annexBNalu(HEVC_IDR));
+}
+
+export function hevcDeltaAccessUnit(): Uint8Array {
+  return concat(annexBNalu(HEVC_DELTA));
+}
+
+export const HEVC_VIDEO_PID = 0x103;
+
+export function pmtSectionHevc(videoPid: number): Uint8Array {
+  return psiSection(0x02, [
+    0x00, 0x01,
+    0xc1, 0x00, 0x00,
+    0xe0, 0x00,
+    0xf0, 0x00,
+    0x24, (0xe000 | videoPid) >> 8, (0xe000 | videoPid) & 0xff, 0xf0, 0x00,
+  ]);
+}
+
+/** A PMT carrying one H.264 stream (0x1B) and one HEVC stream (0x24). */
+export function mixedVideoPmtSection(h264Pid: number, hevcPid: number): Uint8Array {
+  return psiSection(0x02, [
+    0x00, 0x01,
+    0xc1, 0x00, 0x00,
+    0xe0, 0x00,
+    0xf0, 0x00,
+    0x1b, (0xe000 | h264Pid) >> 8, (0xe000 | h264Pid) & 0xff, 0xf0, 0x00,
+    0x24, (0xe000 | hevcPid) >> 8, (0xe000 | hevcPid) & 0xff, 0xf0, 0x00,
+  ]);
+}
+
 export function adtsFrame(frameLength = 17): Uint8Array {
   const out = new Uint8Array(frameLength);
   out[0] = 0xff;

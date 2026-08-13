@@ -1,5 +1,5 @@
 import type { Demuxer, DemuxerEvent } from '@vigilkit/plugin-sdk';
-import { MediaFormatError, adtsToConfig, buildAvcC, codecStringFromSps, stripAdts } from '@vigilkit/media-utils';
+import { MediaFormatError, adtsToConfig, buildAvcC, buildHvcC, codecStringFromSps, parseHvcC, stripAdts } from '@vigilkit/media-utils';
 import { parseAdtsHeader } from './adts.js';
 import { rebuildAvcc, splitNalus } from './es.js';
 import { TsPacketizer, parsePacket } from './packet.js';
@@ -17,8 +17,9 @@ type Listener = (event: DemuxerEvent) => void;
 /**
  * MPEG-TS demuxer (H.264/HEVC video + AAC audio). Emits the SDK
  * `DemuxerEvent` union: metadata / sequence-header / video / audio / error.
- * H.264 is delivered as AVCC length-prefixed chunks with an avcC `description`
- * (the WebCodecs 'avc' format). Audio is demuxed but not decoded.
+ * Video is delivered as length-prefixed chunks with an avcC or hvcC
+ * `description` (the WebCodecs 'avc'/'hvc1' format). Audio is demuxed but
+ * not decoded.
  */
 export class TsDemuxer implements Demuxer {
   private readonly listeners = new Set<Listener>();
@@ -31,9 +32,13 @@ export class TsDemuxer implements Demuxer {
   private readonly streamTypeByPid = new Map<number, number>();
   private readonly pesBuffers = new Map<number, Uint8Array>();
   private adtsCarry = new Uint8Array(0);
+  // Parameter sets (shared; each PES re-scans its own codec's NALUs before
+  // the sequence-header decision, so cross-codec clobbering is harmless).
   private sps: Uint8Array | null = null;
   private pps: Uint8Array | null = null;
+  private vps: Uint8Array | null = null;
   private hasSeqHeader = false;
+  private hasHevcSeqHeader = false;
   private audioConfigEmitted = false;
   private audioMetaEmitted = false;
   private hasVideoStream = false;
@@ -68,13 +73,10 @@ export class TsDemuxer implements Demuxer {
     this.pmtAssembler = null;
     this.pmtPid = null;
     this.streamTypeByPid.clear();
-    this.sps = null;
-    this.pps = null;
-    this.hasSeqHeader = false;
-    this.audioConfigEmitted = false;
-    this.audioMetaEmitted = false;
-    this.hasVideoStream = false;
-    this.hasAudioStream = false;
+    this.sps = this.pps = this.vps = null;
+    this.hasSeqHeader = this.hasHevcSeqHeader = false;
+    this.audioConfigEmitted = this.audioMetaEmitted = false;
+    this.hasVideoStream = this.hasAudioStream = false;
     this.failed = false;
     this.lastEmittedPtsUs = null;
     this.ptsOffsetUs = 0;
@@ -88,13 +90,10 @@ export class TsDemuxer implements Demuxer {
 
     if (pid === PAT_PID) {
       const section = this.patAssembler.push(payload, payloadUnitStart);
-      if (section !== null) {
-        const entries = parsePat(section);
-        const first = entries[0];
-        if (first !== undefined) {
-          this.pmtPid = first.pmtPid;
-          this.pmtAssembler = new SectionAssembler();
-        }
+      const first = section !== null ? parsePat(section)[0] : undefined;
+      if (first !== undefined) {
+        this.pmtPid = first.pmtPid;
+        this.pmtAssembler = new SectionAssembler();
       }
       return;
     }
@@ -111,13 +110,10 @@ export class TsDemuxer implements Demuxer {
   private handlePmt(section: Uint8Array): void {
     let recognized = false;
     for (const entry of parsePmt(section)) {
-      if (entry.streamType === STREAM_VIDEO_H264 || entry.streamType === STREAM_VIDEO_HEVC) {
+      if (entry.streamType === STREAM_VIDEO_H264 || entry.streamType === STREAM_VIDEO_HEVC || entry.streamType === STREAM_AUDIO_AAC) {
         this.streamTypeByPid.set(entry.pid, entry.streamType);
-        this.hasVideoStream = true;
-        recognized = true;
-      } else if (entry.streamType === STREAM_AUDIO_AAC) {
-        this.streamTypeByPid.set(entry.pid, entry.streamType);
-        this.hasAudioStream = true;
+        if (entry.streamType === STREAM_AUDIO_AAC) this.hasAudioStream = true;
+        else this.hasVideoStream = true;
         recognized = true;
       }
     }
@@ -161,11 +157,8 @@ export class TsDemuxer implements Demuxer {
     if (header === null) return;
     const esData = buffer.subarray(header.headerLength);
     if (esData.length === 0) return;
-    if (streamType === STREAM_VIDEO_H264 || streamType === STREAM_VIDEO_HEVC) {
-      this.processVideoPes(esData, header.ptsUs, streamType);
-    } else if (streamType === STREAM_AUDIO_AAC) {
-      this.processAudioPes(esData, header.ptsUs);
-    }
+    if (streamType !== STREAM_AUDIO_AAC) this.processVideoPes(esData, header.ptsUs, streamType);
+    else this.processAudioPes(esData, header.ptsUs);
     this.pesBuffers.delete(pid);
   }
 
@@ -174,32 +167,43 @@ export class TsDemuxer implements Demuxer {
     let hasVcl = false;
     let isKey = false;
     for (const nalu of nalus) {
-      const type = (nalu[0] as number) & 0x1f;
-      if (type === 7) this.sps = nalu.slice();
-      else if (type === 8) this.pps = nalu.slice();
-      else if (type >= 1 && type <= 5) {
-        hasVcl = true;
-        if (type === 5) isKey = true;
+      if (streamType === STREAM_VIDEO_HEVC) {
+        // HEVC NAL units carry a two-byte header; type = (b0 >> 1) & 0x3F.
+        const type = ((nalu[0] as number) >> 1) & 0x3f;
+        if (type === 32) this.vps = nalu.slice();
+        else if (type === 33) this.sps = nalu.slice();
+        else if (type === 34) this.pps = nalu.slice();
+        else if (type <= 9 || (type >= 16 && type <= 31)) {
+          hasVcl = true;
+          if (type >= 16) isKey = true; // IRAP: BLA/IDR/CRA
+        }
+      } else {
+        const type = (nalu[0] as number) & 0x1f;
+        if (type === 7) this.sps = nalu.slice();
+        else if (type === 8) this.pps = nalu.slice();
+        else if (type >= 1 && type <= 5) {
+          hasVcl = true;
+          if (type === 5) isKey = true;
+        }
       }
     }
     if (!hasVcl) return;
 
-    if (!this.hasSeqHeader) {
-      if (streamType === STREAM_VIDEO_HEVC) {
-        this.hasSeqHeader = true;
-        this.emit({ type: 'sequence-header', config: { codec: 'hvc1' } });
-      } else if (this.sps !== null && this.pps !== null) {
-        this.hasSeqHeader = true;
-        this.emit({
-          type: 'sequence-header',
-          config: {
-            codec: codecStringFromSps(this.sps),
-            description: buildAvcC(this.sps, this.pps, 4),
-          },
-        });
+    if (streamType === STREAM_VIDEO_HEVC) {
+      if (!this.hasHevcSeqHeader && this.vps !== null && this.sps !== null && this.pps !== null) {
+        const description = buildHvcC({ vps: this.vps, sps: this.sps, pps: this.pps, lengthSizeMinusOne: 3 });
+        this.hasHevcSeqHeader = true;
+        this.emit({ type: 'sequence-header', config: { codec: parseHvcC(description).codec, description } });
       }
+      if (!this.hasHevcSeqHeader) return;
+    } else if (!this.hasSeqHeader) {
+      if (this.sps === null || this.pps === null) return;
+      this.hasSeqHeader = true;
+      this.emit({
+        type: 'sequence-header',
+        config: { codec: codecStringFromSps(this.sps), description: buildAvcC(this.sps, this.pps, 4) },
+      });
     }
-    if (!this.hasSeqHeader) return;
 
     const data = rebuildAvcc(nalus);
     this.emit({
