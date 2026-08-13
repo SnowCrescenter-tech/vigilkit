@@ -9,6 +9,35 @@
 
 vigilkit 是一个开源（Apache-2.0）、WebCodecs 优先、插件化的 Web 视频播放器 SDK，面向安防监控与 IoT 视频场景。核心引擎零第三方运行时依赖。微内核将 transport 插件、source 插件与 demuxer 插件串接成一条解码管线：H.264 帧由浏览器原生 WebCodecs 硬件解码器解码，再通过 WebGPU（零拷贝 `importExternalTexture`）、WebGL2 或 canvas2d 渲染，按浏览器能力自动选择。HEVC 在支持硬件解码的浏览器里走 WebCodecs，其余场景回退到 WASM 软解，这正是 Firefox 播放 HEVC 的方式。AAC 音频经 WebCodecs `AudioDecoder` 解码后，在 WebAudio sink 上按预定时序播放，并做 audio-master 音视频同步；WHEP source 插件以直接帧的形式接入 WebRTC 出流。全部代码在浏览器中运行，专为低延迟、多路并发的安防监控与 IoT 大屏而设计。
 
+## 从 npm 安装
+
+所有包均已发布到 npm。安装核心引擎与你需要的插件：
+
+```sh
+npm install vigilkit @vigilkit/plugin-flv @vigilkit/plugin-ws @vigilkit/renderer
+# 或使用 pnpm add / yarn add
+```
+
+基本用法：
+
+```ts
+import { createPlayer } from 'vigilkit';
+import { flvDemuxerPlugin } from '@vigilkit/plugin-flv';
+import { wsTransportPlugin } from '@vigilkit/plugin-ws';
+import { createRenderer } from '@vigilkit/renderer';
+
+const player = createPlayer({
+  url: 'ws://your-server/live',
+  demuxer: 'flv',
+  plugins: [wsTransportPlugin(), flvDemuxerPlugin()],
+  renderer: createRenderer(canvas), // 一个 <canvas> 元素
+});
+
+player.play();
+```
+
+> **注意：** 所有包均为 **ESM-only**。工具链（打包器、开发服务器）需要 Node.js 20+；浏览器需要 WebCodecs 以及 WebGPU、WebGL2 或 canvas2d 用于渲染。
+
 ## 零遥测
 
 **vigilkit 不收集任何遥测数据。无分析、无跟踪、无使用计数、无信标。** 所有代码都在浏览器中运行，vigilkit 除了连接应用要求它连接的流地址外，不会发起任何网络请求。不存在 vigilkit 运营的服务器，没有回传端点，没有任何数据离开你的页面。
