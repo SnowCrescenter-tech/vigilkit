@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-dahua",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Dahua CGI vendor plugin for vigilkit: digest auth, device info, channel enumeration, PTZ control, and RTSP / RTSP-over-WebSocket stream URL building",
   "type": "module",
   "license": "Apache-2.0",

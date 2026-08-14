@@ -98,8 +98,10 @@ if (onlyName) {
 // Per-package command, run with cwd = package dir. prepublishOnly builds dist.
 // --provenance requires OIDC (see header comment): in the release workflow the
 // runner's `id-token: write` permission supplies the sigstore identity; local
-// publishes without OIDC must drop the flag.
-const PUBLISH_ARGS = ['publish', '--no-git-checks', '--provenance'];
+// publishes without OIDC must drop the flag, so it is enabled only when the
+// GitHub Actions OIDC token is present (GITHUB_ACTIONS + ACTIONS_ID_TOKEN_REQUEST_URL).
+const ciProvenance = process.env.GITHUB_ACTIONS === 'true' && !!process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+const PUBLISH_ARGS = ['publish', '--no-git-checks', ...(ciProvenance ? ['--provenance'] : [])];
 
 if (dryRun) {
   console.log(

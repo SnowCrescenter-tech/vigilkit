@@ -1,6 +1,6 @@
 {
   "name": "vigilkit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Microkernel media engine for vigilkit — zero third-party runtime deps",
   "type": "module",
   "license": "Apache-2.0",

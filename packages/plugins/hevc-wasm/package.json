@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-hevc-wasm",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "LGPL libde265 (WASM) soft-decoder adapter for vigilkit's VideoCodecDecoder interface",
   "type": "module",
   "license": "Apache-2.0",

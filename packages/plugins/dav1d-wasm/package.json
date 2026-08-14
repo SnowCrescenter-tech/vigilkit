@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-dav1d-wasm",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "BSD-2-Clause dav1d (WASM) soft-decoder adapter for vigilkit's VideoCodecDecoder interface",
   "type": "module",
   "license": "Apache-2.0",

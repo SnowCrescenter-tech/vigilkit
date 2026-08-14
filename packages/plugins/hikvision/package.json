@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-hikvision",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Hikvision ISAPI plugin for vigilkit: digest auth, device discovery, channel enumeration, PTZ control, and stream URL building",
   "type": "module",
   "license": "Apache-2.0",

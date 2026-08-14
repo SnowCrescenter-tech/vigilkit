@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-gb28181",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "GB28181 SIP signaling skeleton (SIP + SDP parsers and session state machine) for vigilkit",
   "type": "module",
   "license": "Apache-2.0",

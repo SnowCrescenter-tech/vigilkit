@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-ps",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "GB28181 PS (MPEG Program Stream) demuxer + media source plugin for vigilkit",
   "type": "module",
   "license": "Apache-2.0",

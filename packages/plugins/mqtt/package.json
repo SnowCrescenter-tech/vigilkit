@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-mqtt",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MQTT 3.1.1 client plugin for vigilkit: zero-dependency MQTT over WebSocket for IoT control, event triggers, and device metadata",
   "type": "module",
   "license": "Apache-2.0",

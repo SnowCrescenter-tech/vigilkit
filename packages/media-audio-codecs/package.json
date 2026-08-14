@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/media-audio-codecs",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Software audio codecs for vigilkit: G.711 (mu-law / A-law) and 16-bit PCM. Zero third-party dependencies. G.726 is deferred (see DEFERRED.md).",
   "type": "module",
   "license": "Apache-2.0",
