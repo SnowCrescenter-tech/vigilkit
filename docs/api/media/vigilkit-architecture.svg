@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="560" viewBox="0 0 880 560" role="img" aria-labelledby="title desc">
+  <title id="title">vigilkit architecture</title>
+  <desc id="desc">vigilkit is a microkernel: source/transport plugins feed a jitter buffer, the codec-routing decoder prefers WebCodecs and falls back to WASM soft decode, frames are drawn through WebGPU / WebGL2 / canvas2d, audio goes through WebCodecs AudioDecoder to a WebAudio sink, and the WHEP plugin delivers direct frames.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#0a0e14"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161b22"/>
+      <stop offset="1" stop-color="#10141a"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c2128"/>
+      <stop offset="1" stop-color="#161a20"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f6feb"/>
+      <stop offset="1" stop-color="#388bfd"/>
+    </linearGradient>
+    <linearGradient id="wasm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8957e5"/>
+      <stop offset="1" stop-color="#a371f7"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrowGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8b949e"/>
+    </marker>
+    <marker id="arrowDash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#a371f7"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3fb950"/>
+    </marker>
+  </defs>
+
+  <rect width="880" height="560" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="440" y="38" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="24" font-weight="700" fill="#e6edf3">vigilkit <tspan fill="#58a6ff">architecture</tspan></text>
+  <text x="440" y="58" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" fill="#8b949e">microkernel · codec-routing decode · plugin ring</text>
+
+  <!-- ================= PLUGIN RING (left) ================= -->
+  <g>
+    <rect x="24" y="84" width="210" height="420" rx="14" fill="url(#core)" stroke="#30363d" stroke-width="1.5"/>
+    <text x="129" y="110" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" letter-spacing="1.5" fill="#8b949e">PLUGIN RING</text>
+    <text x="129" y="126" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#6e7681">@vigilkit/plugin-sdk</text>
+
+    <!-- plugin boxes -->
+    <rect x="44" y="142" width="170" height="40" rx="8" fill="url(#box)" stroke="#388bfd" stroke-width="1.2"/>
+    <text x="129" y="158" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="600" fill="#58a6ff">plugin-flv</text>
+    <text x="129" y="173" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">H.264 / AAC demuxer</text>
+
+    <rect x="44" y="196" width="170" height="40" rx="8" fill="url(#box)" stroke="#388bfd" stroke-width="1.2"/>
+    <text x="129" y="212" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="600" fill="#58a6ff">plugin-ws</text>
+    <text x="129" y="227" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">WebSocket transport</text>
+
+    <rect x="44" y="250" width="170" height="40" rx="8" fill="url(#box)" stroke="#388bfd" stroke-width="1.2"/>
+    <text x="129" y="266" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="600" fill="#58a6ff">plugin-hls</text>
+    <text x="129" y="281" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">m3u8 + MPEG-TS</text>
+
+    <rect x="44" y="304" width="170" height="40" rx="8" fill="url(#box)" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="129" y="320" text-anchor="middle" font-family="Consolas, monospace" font-size="13" font-weight="600" fill="#a371f7">plugin-whep</text>
+    <text x="129" y="335" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">WebRTC egress · direct frames</text>
+
+    <rect x="44" y="358" width="170" height="40" rx="8" fill="url(#box)" stroke="#3fb950" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="129" y="374" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#3fb950">vendor / community</text>
+    <text x="129" y="389" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">bring your own protocol</text>
+
+    <rect x="44" y="420" width="170" height="60" rx="8" fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="4 3" opacity="0.6"/>
+    <text x="129" y="444" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="11" fill="#8b949e">any transport, demuxer,</text>
+    <text x="129" y="460" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="11" fill="#8b949e">or source plugin</text>
+  </g>
+
+  <!-- arrows: plugins -> jitter buffer -->
+  <path d="M214 162 H268" stroke="#58a6ff" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <path d="M214 216 H268" stroke="#58a6ff" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <path d="M214 270 H268" stroke="#58a6ff" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <!-- WHEP direct path (dashed bypass) -->
+  <path d="M214 324 C 250 372, 300 400, 480 402" stroke="#a371f7" stroke-width="1.6" stroke-dasharray="6 4" fill="none" marker-end="url(#arrowDash)"/>
+  <text x="312" y="388" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#a371f7">decoded VideoFrame events</text>
+  <path d="M214 378 H268" stroke="#3fb950" stroke-width="1.6" fill="none" marker-end="url(#arrowGreen)"/>
+
+  <!-- ================= CORE MICROKERNEL (center) ================= -->
+  <g>
+    <rect x="286" y="84" width="330" height="420" rx="14" fill="url(#core)" stroke="#30363d" stroke-width="1.5"/>
+    <text x="451" y="110" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" letter-spacing="1.5" fill="#8b949e">CORE MICROKERNEL</text>
+    <text x="451" y="126" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#6e7681">zero third-party runtime deps</text>
+
+    <!-- jitter buffer -->
+    <rect x="306" y="142" width="150" height="48" rx="8" fill="url(#box)" stroke="#30363d" stroke-width="1.2"/>
+    <text x="381" y="162" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#e6edf3">jitter buffer</text>
+    <text x="381" y="180" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">packet timing</text>
+
+    <!-- QoS watchdog -->
+    <rect x="306" y="202" width="150" height="48" rx="8" fill="url(#box)" stroke="#30363d" stroke-width="1.2"/>
+    <text x="381" y="222" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#e6edf3">QoS watchdog</text>
+    <text x="381" y="240" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">stall detection</text>
+
+    <!-- rAF pump -->
+    <rect x="306" y="262" width="150" height="48" rx="8" fill="url(#box)" stroke="#30363d" stroke-width="1.2"/>
+    <text x="381" y="282" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#e6edf3">rAF pump</text>
+    <text x="381" y="300" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">requestAnimationFrame</text>
+
+    <!-- master clock -->
+    <rect x="306" y="322" width="150" height="48" rx="8" fill="url(#box)" stroke="#d29922" stroke-width="1.2"/>
+    <text x="381" y="342" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#e3b341">master clock</text>
+    <text x="381" y="360" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">audio-master · A/V sync</text>
+
+    <!-- codec-routing decoder -->
+    <rect x="470" y="142" width="126" height="118" rx="10" fill="url(#box)" stroke="#388bfd" stroke-width="1.6"/>
+    <text x="533" y="162" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">codec-routing</text>
+    <text x="533" y="177" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#e6edf3">decoder</text>
+
+    <rect x="484" y="190" width="98" height="26" rx="6" fill="#0d419d"/>
+    <text x="533" y="207" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#79c0ff">WebCodecs · HW</text>
+    <path d="M533 216 V228" stroke="#8b949e" stroke-width="1" fill="none"/>
+
+    <rect x="484" y="228" width="98" height="26" rx="6" fill="#3d2a6b"/>
+    <text x="533" y="245" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#d2a8ff">WASM · soft</text>
+    <text x="533" y="273" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="9" fill="#8b949e">H.264 / HEVC / AV1</text>
+  </g>
+
+  <!-- arrows inside core -->
+  <path d="M456 166 H466" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+  <path d="M456 226 H466" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+  <path d="M456 286 H466" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+  <path d="M533 262 V286" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+  <path d="M381 348 V390" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+
+  <!-- ================= AUDIO PATH (bottom center-right) ================= -->
+  <g>
+    <rect x="470" y="322" width="126" height="48" rx="8" fill="url(#box)" stroke="#3fb950" stroke-width="1.2"/>
+    <text x="533" y="342" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#3fb950">audio branch</text>
+    <text x="533" y="360" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">AudioDecoder</text>
+    <path d="M533 370 V392" stroke="#3fb950" stroke-width="1.4" fill="none" marker-end="url(#arrowGreen)"/>
+    <rect x="470" y="396" width="126" height="48" rx="8" fill="url(#box)" stroke="#3fb950" stroke-width="1.2"/>
+    <text x="533" y="414" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#3fb950">WebAudio sink</text>
+    <text x="533" y="432" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">250 ms ahead</text>
+  </g>
+
+  <!-- ================= RENDERER SURFACE (right) ================= -->
+  <g>
+    <rect x="632" y="84" width="224" height="420" rx="14" fill="url(#core)" stroke="#30363d" stroke-width="1.5"/>
+    <text x="744" y="110" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="12" font-weight="600" letter-spacing="1.5" fill="#8b949e">RENDERER SURFACE</text>
+
+    <rect x="650" y="142" width="188" height="56" rx="8" fill="url(#accent)"/>
+    <text x="744" y="166" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#ffffff">WebGPU</text>
+    <text x="744" y="184" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#cfe3ff">zero-copy importExternalTexture</text>
+
+    <rect x="650" y="218" width="188" height="56" rx="8" fill="url(#box)" stroke="#388bfd" stroke-width="1.2"/>
+    <text x="744" y="242" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#79c0ff">WebGL2</text>
+    <text x="744" y="260" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">VideoFrame texture upload</text>
+
+    <rect x="650" y="294" width="188" height="56" rx="8" fill="url(#box)" stroke="#30363d" stroke-width="1.2"/>
+    <text x="744" y="318" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="14" font-weight="700" fill="#e6edf3">canvas2d</text>
+    <text x="744" y="336" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#8b949e">universal fallback</text>
+
+    <path d="M744 198 V214" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+    <path d="M744 274 V290" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+    <path d="M744 350 V396" stroke="#8b949e" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+
+    <text x="744" y="430" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="11" fill="#8b949e">auto fallback via</text>
+    <text x="744" y="446" text-anchor="middle" font-family="Consolas, monospace" font-size="11" fill="#58a6ff">createRendererAsync()</text>
+    <text x="744" y="470" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="10" fill="#6e7681">multi-view ready</text>
+  </g>
+
+  <!-- main decode arrow: decoder -> renderer -->
+  <path d="M600 200 C 616 200, 616 172, 632 172" stroke="#58a6ff" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <path d="M600 202 C 616 202, 616 258, 632 258" stroke="#58a6ff" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <path d="M600 204 C 616 204, 616 332, 632 332" stroke="#58a6ff" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <!-- sync arrow master clock -> canvas2d area -->
+  <path d="M456 346 H632" stroke="#d29922" stroke-width="1.4" fill="none" marker-end="url(#arrowGrey)"/>
+
+  <!-- footer -->
+  <text x="440" y="530" text-anchor="middle" font-family="Segoe UI, -apple-system, sans-serif" font-size="11" fill="#6e7681">plugin ring → jitter buffer → codec-routing decoder → renderer surface · WHEP bypasses the decode chain with direct frames</text>
+</svg>

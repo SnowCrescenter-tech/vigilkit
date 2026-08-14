@@ -1,0 +1,11 @@
+vigilkit plugin-gb28181 (GB28181 SIP signaling skeleton)
+Copyright 2026 vigilkit contributors
+
+This package is implemented from RFC 3261 (SIP), RFC 4566 (SDP),
+RFC 7616 (HTTP Digest authentication, adapted to the SIP Authorization
+header) and GB/T 28181-2022 (公共安全视频监控联网系统信息传输、交换、控制
+技术要求). It contains no third-party code; the digest helper is adapted
+from the vigilkit plugin-hikvision package (same project, Apache-2.0).
+
+This product includes software developed by the vigilkit contributors.
+Licensed under the Apache License, Version 2.0.

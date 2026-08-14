@@ -1,0 +1,52 @@
+{
+  "name": "@vigilkit/plugin-ps",
+  "version": "0.3.0",
+  "description": "GB28181 PS (MPEG Program Stream) demuxer + media source plugin for vigilkit",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vigilkit/plugin-sdk": "workspace:*",
+    "@vigilkit/media-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "prepublishOnly": "pnpm build",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SnowCrescenter-tech/vigilkit.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "webcodecs",
+    "surveillance",
+    "gb28181",
+    "mpeg-ps"
+  ]
+}

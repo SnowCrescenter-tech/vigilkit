@@ -1,0 +1,9 @@
+vigilkit plugin-ps (GB28181 PS demuxer + source plugin)
+Copyright 2026 vigilkit contributors
+
+The PS (MPEG Program Stream) demuxer in this package is implemented from
+ISO/IEC 13818-1 (MPEG-2 Systems) and GB/T 28181-2022 (公共安全视频监控联网
+系统信息传输、交换、控制技术要求). It contains no third-party code.
+
+This product includes software developed by the vigilkit contributors.
+Licensed under the Apache License, Version 2.0.

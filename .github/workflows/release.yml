@@ -2,12 +2,18 @@ name: Release
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Provenance permissions: scripts/publish-all.mjs publishes with
+    # `pnpm publish --provenance`, which signs each tarball with a sigstore
+    # OIDC identity minted from the GitHub Actions OIDC token. `id-token:
+    # write` is REQUIRED for that — without it the publish step fails with
+    # "provenance generation failed". `contents: read` covers checkout. No
+    # other permissions are granted.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,8 +38,20 @@ jobs:
       # verify-pack asserts every tarball is publishable (dist present, no
       # node_modules, workspace:* resolved) BEFORE anything reaches the registry.
       - run: node scripts/verify-pack.mjs
-      # publish-all publishes the 11 packages in dependency order
-      # (plugin-sdk -> media-utils -> plugin-flv -> plugin-ws -> plugin-hls ->
-      # plugin-whep -> vigilkit -> plugin-hevc-wasm -> plugin-dav1d-wasm ->
-      # plugin-hikvision -> renderer), aborting on the first failure.
+      # publish-all publishes the 15 packages in dependency order
+      # (plugin-sdk -> media-utils -> media-audio-codecs -> plugin-flv ->
+      # plugin-ws -> plugin-hls -> plugin-whep -> plugin-ps -> plugin-gb28181
+      # -> vigilkit -> plugin-hevc-wasm -> plugin-dav1d-wasm ->
+      # plugin-hikvision -> plugin-dahua -> renderer), aborting on the first
+      # failure. Each publish runs with `--provenance` (sigstore OIDC signing,
+      # see scripts/publish-all.mjs), which is why this job declares
+      # `id-token: write` above.
+      #
+      # Release checklist:
+      # - NPM_TOKEN repository secret must be set (repo Settings -> Secrets and
+      #   variables -> Actions -> NPM_TOKEN, value = npm token with publish
+      #   scope); the publish step fails with an auth error without it.
+      # - Provenance is only produced when publishing from this GitHub Actions
+      #   runner, because it is the OIDC identity provider. A local
+      #   `pnpm publish` has no OIDC token and will NOT produce provenance.
       - run: node scripts/publish-all.mjs

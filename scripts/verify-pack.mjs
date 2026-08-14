@@ -4,11 +4,11 @@
 //
 //   node scripts/verify-pack.mjs
 //
-// For each of the 12 packages it runs a real `pnpm pack --pack-destination
+// For each of the 15 packages it runs a real `pnpm pack --pack-destination
 // <tmp>`, extracts the tarball, and asserts:
 //   (a) dist/index.js and dist/index.d.ts are present in the tarball;
 //   (b) there is NO node_modules directory anywhere inside the tarball;
-//   (c) the packed package.json has no `workspace:` protocol left 鈥?every
+//   (c) the packed package.json has no `workspace:` protocol left 閳?every
 //       dependency is resolved to a real published version.
 //
 // Reports per-package PASS/FAIL and exits 1 if any package fails.
@@ -25,10 +25,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGES = [
   { name: '@vigilkit/plugin-sdk', dir: 'packages/plugin-sdk' },
   { name: '@vigilkit/media-utils', dir: 'packages/media-utils' },
+  { name: '@vigilkit/media-audio-codecs', dir: 'packages/media-audio-codecs' },
   { name: '@vigilkit/plugin-flv', dir: 'packages/plugins/flv' },
   { name: '@vigilkit/plugin-ws', dir: 'packages/plugins/ws' },
   { name: '@vigilkit/plugin-hls', dir: 'packages/plugins/hls' },
   { name: '@vigilkit/plugin-whep', dir: 'packages/plugins/whep' },
+  { name: '@vigilkit/plugin-ps', dir: 'packages/plugins/ps' },
+  { name: '@vigilkit/plugin-gb28181', dir: 'packages/plugins/gb28181' },
   { name: 'vigilkit', dir: 'packages/core' },
   { name: '@vigilkit/plugin-hevc-wasm', dir: 'packages/plugins/hevc-wasm' },
   { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
@@ -158,10 +161,10 @@ function verify(pkg) {
     for (const ref of leftover) problems.push(`workspace: protocol still present (${ref})`);
 
     // (d) LICENSE must ship in every tarball (npm auto-includes it, but only
-    // if a LICENSE file exists in the package 鈥?assert it made it in). The
+    // if a LICENSE file exists in the package 閳?assert it made it in). The
     // wasm adapter packages also carry a NOTICE with third-party attribution
     // (LGPL-3.0 source offer for libde265, BSD/CC0 for dav1d); it is NOT
-    // auto-included by npm, so the `files` array must list it 鈥?assert it.
+    // auto-included by npm, so the `files` array must list it 閳?assert it.
     if (!existsSync(join(packageRoot, 'LICENSE'))) problems.push('LICENSE missing from tarball');
     if (pkg.name === '@vigilkit/plugin-hevc-wasm' || pkg.name === '@vigilkit/plugin-dav1d-wasm') {
       if (!existsSync(join(packageRoot, 'NOTICE'))) {
@@ -195,6 +198,6 @@ const passed = results.filter((r) => r.ok).length;
 const total = results.length;
 console.log(`[verify-pack] verdict: ${passed}/${total} PASS`);
 if (passed !== total) {
-  console.error('[verify-pack] one or more packages are not publishable 鈥?aborting release.');
+  console.error('[verify-pack] one or more packages are not publishable 閳?aborting release.');
   process.exit(1);
 }

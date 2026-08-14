@@ -16,7 +16,9 @@
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "fix:fixture": "node scripts/fetch-fixture.mjs",
     "notices": "node scripts/check-licenses.mjs --generate-notices",
-    "check:licenses": "node scripts/check-licenses.mjs --ci"
+    "check:licenses": "node scripts/check-licenses.mjs --ci",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "docs": "typedoc"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -24,6 +26,7 @@
     "eslint": "^9.0.0",
     "license-checker-rseidelsohn": "^5.0.0",
     "tsup": "^8.5.0",
+    "typedoc": "^0.28.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^4.0.0"

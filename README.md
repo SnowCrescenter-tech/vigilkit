@@ -67,6 +67,10 @@ The example app supports four demo modes, selected with the `source` query param
 | HEVC | `?source=hevc` | HEVC soft-decode via libde265 WASM (works in Firefox) |
 | WHEP | `?source=whep&endpoint=<resource-url>` | WebRTC egress via the WHEP source plugin (needs a WHEP server, e.g. MediaMTX) |
 
+## API documentation
+
+Browsable API reference is generated locally with `pnpm run docs` (TypeDoc) and lives in [`docs/api/`](docs/api/index.html); a complete reference of every error code — what it means, where it is raised, and how to react — is in [`docs/error-codes.md`](docs/error-codes.md).
+
 ## Install from npm
 
 All packages are published on npm. Install the engine plus the plugins you need:
@@ -113,12 +117,15 @@ WHEP is the exception to the pipeline above: it delivers already-decoded `VideoF
 | `vigilkit` | Core microkernel engine: AV sync, jitter buffer, decode scheduling, `CodecRoutingDecoder` (WebCodecs-first with async `isConfigSupported` probe, buffered decodes, soft-decoder fallback, `forceSoft` option), source-plugin branch, rAF playback pump (`PlayerOptions.pump`), audio pipeline (`AudioDecoderWrapper` → WebAudio sink, `PlayerOptions.audio`, audio-master `MasterClock`), direct-frame path for WHEP-style sources, `PlayerOptions.softDecoder` / `sourceOptions`. Zero third-party runtime dependencies. |
 | `@vigilkit/plugin-sdk` | Plugin contract types (transport, demuxer, source) and the plugin registry. |
 | `@vigilkit/media-utils` | Shared byte-reader / NALU / AVC helpers for demuxer plugins (FLV and HLS both build on it). |
+| `@vigilkit/media-audio-codecs` | Software audio codecs: G.711 μ-law / A-law (byte-exact CCITT) and 16-bit PCM, zero dependencies. G.726 is deferred (see `DEFERRED.md`). |
 | `@vigilkit/plugin-flv` | FLV demuxer plugin (H.264/AAC), refactored onto `media-utils`; AAC sequence header → `audio-config` (ASC) + raw AAC chunks. |
 | `@vigilkit/plugin-ws` | WebSocket transport plugin (`ws` / `wss`). |
 | `@vigilkit/plugin-hls` | HLS source plugin: m3u8 parser, MPEG-TS demuxer, H.264 → AVCC + avcC description, AAC via first-ADTS-frame `audio-config` (ADTS headers stripped, raw AAC payload), VOD + live reload + ABR variant select, PTS discontinuity offset. |
 | `@vigilkit/plugin-hevc-wasm` | LGPL-3.0 libde265 adapter implementing the core's `VideoCodecDecoder` interface; sha256-pinned artifact loader with `wasmBinary` injection; I420 → `VideoFrame` with canvas RGBA fallback. |
 | `@vigilkit/plugin-dav1d-wasm` | AV1 WASM soft-decode adapter (CC0/BSD dav1d.js wrapping a vendored dav1d artifact) implementing `VideoCodecDecoder`, same isolated-artifact + sha256-pinned loader pattern as the HEVC plugin. |
 | `@vigilkit/plugin-whep` | WHEP (WebRTC-HTTP Egress Protocol) media source plugin: POST offer / PATCH answer + trickle ICE, emits decoded `VideoFrame`s as direct `frame` events (bypasses the encoded decode chain); also supports an insertable-streams encoded path (Chromium-only). |
+| `@vigilkit/plugin-ps` | MPEG-PS demuxer plugin (GB28181 media container): pack/PES parsing with 33-bit PTS reassembly, H.264/HEVC sequence headers from SPS/PPS, raw G.711/G.726/AAC audio. |
+| `@vigilkit/plugin-gb28181` | GB28181 signaling skeleton: SIP message parser/serializer (RFC 3261), SDP offer/answer builder (PS + G.711 payload types), and the `Gb28181Session` state machine. RTP/PS media consumption plugs into `plugin-ps`. |
 | `@vigilkit/plugin-hikvision` | Hikvision ISAPI vendor plugin: HTTP Digest auth (RFC 7616, MD5), device discovery, channel enumeration, PTZ control, and RTSP/HTTP stream URL building. Zero runtime dependencies. |
 | `@vigilkit/plugin-dahua` | Dahua CGI vendor plugin: HTTP Digest auth, device info, channel enumeration, PTZ control, and RTSP / RTSP-over-WebSocket stream URL building. Zero runtime dependencies. |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})` with WebGPU → WebGL2 → canvas2d fallback; zero-copy `importExternalTexture` in `WebGPURenderer`. |
@@ -258,9 +265,11 @@ node scripts/check-licenses.mjs --ci   # license scan, verdict must stay PASS
 
 Run `pnpm exec playwright install chromium firefox` once before the first e2e run. The e2e suite reproduces QA against committed fixtures: an FFmpeg FATE FLV sample (`examples/basic/fixtures/`, sha256-pinned) and an FFmpeg FATE HEVC sample (`examples/basic/hevc-fixtures/paired_fields.hevc`). The v0.2 e2e evidence still holds: HLS played in headless Chromium (551 ms to first playable), HEVC soft-decode delivered frames at ~1.1 s on the main-thread path (worker path experimental via `?worker=1`, renderMode falls back to webgl2 in headless), and the v0.1 WS-FLV case still passes (203 frames at ~34 fps, 0 errors). The HEVC Node smoke test (`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`) decodes the real `paired_fields.hevc` fixture to 2 frames.
 
-Release tooling quick notes: `scripts/publish-all.mjs` publishes the 11 publishable packages in dependency order (`--dry-run` prints the plan without publishing, `--only <name>` resumes after a failure); `scripts/verify-pack.mjs` packs every tarball and asserts the dist entry points, no bundled `node_modules`, resolved `workspace:` versions, and LICENSE/NOTICE presence before anything reaches the registry; `.github/workflows/release.yml` wires both into a manual `workflow_dispatch` release that requires the `NPM_TOKEN` repository secret.
+Release tooling quick notes: `scripts/publish-all.mjs` publishes the 12 publishable packages in dependency order (`--dry-run` prints the plan without publishing, `--only <name>` resumes after a failure); `scripts/verify-pack.mjs` packs every tarball and asserts the dist entry points, no bundled `node_modules`, resolved `workspace:` versions, and LICENSE/NOTICE presence before anything reaches the registry; `.github/workflows/release.yml` wires both into a manual `workflow_dispatch` release that requires the `NPM_TOKEN` repository secret.
 
-`pnpm notices` regenerates [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) from the installed dependency tree.
+`pnpm notices` regenerates [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) from the installed dependency tree. `pnpm run sbom` regenerates the SBOM ([SBOM.md](SBOM.md) + [sbom.spdx.json](sbom.spdx.json), SPDX 2.3) from the same license-scan data (note: pnpm's builtin `sbom` command shadows the script name, so use `pnpm run sbom`).
+
+**Release security:** all packages publish with `--provenance` (sigstore OIDC signing) from the GitHub Actions release workflow, whose `id-token: write` permission mints the OIDC identity — local or manual `pnpm publish` runs carry no provenance.
 
 ## Roadmap
 

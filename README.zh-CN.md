@@ -67,6 +67,10 @@ pnpm --filter @vigilkit/example-basic serve -- --port 9000
 | HEVC | `?source=hevc` | 经 libde265 WASM 软解播放 HEVC（Firefox 可用） |
 | WHEP | `?source=whep&endpoint=<resource-url>` | 经 WHEP source 插件播放 WebRTC 出流（需要 WHEP 服务器，例如 MediaMTX） |
 
+## API 文档
+
+本地执行 `pnpm run docs`（TypeDoc）生成可浏览的 API 参考，输出位于 [`docs/api/`](docs/api/index.html)；完整错误码参考（含义、抛出位置与处理建议）见 [`docs/error-codes.md`](docs/error-codes.md)。
+
 ## 从 npm 安装
 
 所有包均已发布到 npm。安装核心引擎与你需要的插件：
@@ -113,12 +117,15 @@ WHEP 是上述管线的例外：它以 `frame` 事件直接投递已解码的 `V
 | `vigilkit` | 核心微内核引擎：AV 同步、jitter buffer、解码调度、`CodecRoutingDecoder`（WebCodecs 优先、异步 `isConfigSupported` 探测、缓冲解码、软解回退、`forceSoft` 选项）、source 插件分支、rAF 播放泵（`PlayerOptions.pump`）、音频管线（`AudioDecoderWrapper` → WebAudio sink、`PlayerOptions.audio`、audio-master `MasterClock`）、面向 WHEP 类 source 的直接帧路径、`PlayerOptions.softDecoder` / `sourceOptions`。零第三方运行时依赖。 |
 | `@vigilkit/plugin-sdk` | 插件契约类型（transport、demuxer、source）与插件注册表。 |
 | `@vigilkit/media-utils` | 面向 demuxer 插件的共享 byte-reader / NALU / AVC 辅助工具（FLV 与 HLS 均构建其上）。 |
+| `@vigilkit/media-audio-codecs` | 软件音频编解码：G.711 μ-law / A-law（与 CCITT 参考字节级一致）与 16 位 PCM，零依赖。G.726 已延期（见 `DEFERRED.md`）。 |
 | `@vigilkit/plugin-flv` | FLV demuxer 插件（H.264/AAC），已重构到 `media-utils` 之上；AAC 序列头 → `audio-config`（ASC）+ 原始 AAC 块。 |
 | `@vigilkit/plugin-ws` | WebSocket transport 插件（`ws` / `wss`）。 |
 | `@vigilkit/plugin-hls` | HLS source 插件：m3u8 解析、MPEG-TS 解封装、H.264 → AVCC + avcC description、AAC 经首个 ADTS 帧生成 `audio-config`（剥离 ADTS 头，投递原始 AAC 载荷）、VOD + 直播重载 + ABR 变体选择、PTS 不连续偏移。 |
 | `@vigilkit/plugin-hevc-wasm` | LGPL-3.0 libde265 适配器，实现核心的 `VideoCodecDecoder` 接口；sha256 锁定的产物加载器 + `wasmBinary` 注入；I420 → `VideoFrame`，带 canvas RGBA 回退。 |
 | `@vigilkit/plugin-dav1d-wasm` | AV1 WASM 软解适配器（CC0/BSD dav1d.js 封装 vendored dav1d 产物），实现 `VideoCodecDecoder`，与 HEVC 插件相同的「产物隔离 + sha256 锁定加载器」模式。 |
 | `@vigilkit/plugin-whep` | WHEP（WebRTC-HTTP Egress Protocol）media source 插件：POST offer / PATCH answer + trickle ICE，以直接 `frame` 事件投递已解码的 `VideoFrame`（绕过编码解码链）；另支持 insertable-streams 编码路径（仅 Chromium）。 |
+| `@vigilkit/plugin-ps` | MPEG-PS 解复用器插件（GB28181 媒体容器）：pack/PES 解析 + 33 位 PTS 重装、H.264/HEVC 序列头（SPS/PPS）、原始 G.711/G.726/AAC 音频。 |
+| `@vigilkit/plugin-gb28181` | GB28181 信令骨架：SIP 消息解析/序列化（RFC 3261）、SDP offer/answer 构建（PS + G.711 载荷类型）、`Gb28181Session` 状态机。RTP/PS 媒体消费接入 `plugin-ps`。 |
 | `@vigilkit/plugin-hikvision` | 海康 ISAPI 厂商插件：HTTP Digest 认证（RFC 7616、MD5）、设备发现、通道枚举、云台控制、RTSP/HTTP 流地址构建。零运行时依赖。 |
 | `@vigilkit/plugin-dahua` | 大华 CGI 厂商插件：HTTP Digest 认证、设备信息、通道枚举、云台控制、RTSP / RTSP-over-WebSocket 流地址构建。零运行时依赖。 |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})`，WebGPU → WebGL2 → canvas2d 依次回退；`WebGPURenderer` 零拷贝 `importExternalTexture`。 |
@@ -258,7 +265,9 @@ node scripts/check-licenses.mjs --ci   # 许可证扫描，结论必须保持 PA
 
 发布工具链速览：`scripts/publish-all.mjs` 按依赖顺序发布 12 个可发布包（`--dry-run` 只打印计划不发布，`--only <name>` 可在失败后续跑）；`scripts/verify-pack.mjs` 对每个包实际打 tar 包并断言 dist 入口、tarball 内无 `node_modules`、`workspace:` 协议已解析、LICENSE/NOTICE 存在，全部通过才会触达 registry；`.github/workflows/release.yml` 把两者接入手动触发的 `workflow_dispatch` 发布流程，需要 `NPM_TOKEN` 仓库密钥。
 
-`pnpm notices` 会根据已安装的依赖树重新生成 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+`pnpm notices` 会根据已安装的依赖树重新生成 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。`pnpm run sbom` 基于同一份许可证扫描数据重新生成 SBOM（[SBOM.md](SBOM.md) 与 [sbom.spdx.json](sbom.spdx.json)，SPDX 2.3）（注意：pnpm 内置的 `sbom` 命令会遮蔽同名脚本，请使用 `pnpm run sbom`）。
+
+**发布安全：** 所有包均在 GitHub Actions 发布流程中以 `--provenance`（sigstore OIDC 签名）发布，工作流的 `id-token: write` 权限用于签发 OIDC 身份——本地或手动执行 `pnpm publish` 不会携带 provenance。
 
 ## 路线图
 

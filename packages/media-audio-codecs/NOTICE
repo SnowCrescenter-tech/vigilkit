@@ -1,0 +1,11 @@
+This package is part of vigilkit (Apache-2.0, https://github.com/SnowCrescenter-tech/vigilkit).
+
+The audio codecs in this package (@vigilkit/media-audio-codecs) are original
+TypeScript implementations written directly from the public ITU-T specifications:
+
+- G.711 (μ-law / A-law companding), ITU-T Recommendation G.711 (1988)
+- G.726 (40/32/24/16 kbit/s adaptive differential PCM), ITU-T Recommendation G.726 (1990)
+
+No third-party code, no GPL/LGPL-derived code, and no runtime dependencies are
+included. These specifications are freely published by ITU-T; the algorithms
+are re-implemented from the normative equations and tables in the standards.

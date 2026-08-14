@@ -1,18 +1,27 @@
 #!/usr/bin/env node
 // Publishes every publishable vigilkit package, in dependency order.
 //
-//   node scripts/publish-all.mjs                      # publish all 12 packages, in order
+//   node scripts/publish-all.mjs                      # publish all 15 packages, in order
 //   node scripts/publish-all.mjs --dry-run            # print the ordered plan, publish nothing
 //   node scripts/publish-all.mjs --only <name>        # publish a single package only (resume)
 //   node scripts/publish-all.mjs --only @vigilkit/plugin-flv --dry-run
 //
 // Each package is published from its own directory with `pnpm publish
-// --no-git-checks`: the package's prepublishOnly script builds dist/ first,
-// and --no-git-checks skips pnpm's dirty-worktree check. The order below is
-// the topological order of the workspace:* dependency edges (a package is only
-// published after everything it depends on), so dependents resolve real
-// published versions instead of unpublished ones. Publishing aborts at the
-// first failure (reported with package + command) and exits 1.
+// --no-git-checks --provenance`: the package's prepublishOnly script builds
+// dist/ first, and --no-git-checks skips pnpm's dirty-worktree check.
+// --provenance attaches a sigstore OIDC-signed provenance statement to the
+// published tarball (supply-chain integrity: consumers can verify the package
+// was built and published by the vigilkit GitHub Actions release workflow).
+// Requirements: the publishing runner must provide an OIDC token (GitHub
+// Actions `permissions: id-token: write` 鈥?see .github/workflows/release.yml)
+// and npm >= 9.5 / pnpm >= 8.x. Fallback: a LOCAL `pnpm publish` has no OIDC
+// identity, so provenance is only produced by the release workflow; drop
+// --provenance for any manual, out-of-band publish.
+//
+// The order below is the topological order of the workspace:* dependency edges
+// (a package is only published after everything it depends on), so dependents
+// resolve real published versions instead of unpublished ones. Publishing
+// aborts at the first failure (reported with package + command) and exits 1.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,16 +30,19 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Ordered publish list. ORDER MATTERS 鈥?it encodes the dependency edges:
+// Ordered publish list. ORDER MATTERS 閳?it encodes the dependency edges:
 //   plugin-sdk <- {flv, ws, hls, core}; media-utils <- {flv, hls};
 //   core (vigilkit) <- {hevc-wasm, renderer}.
 const PACKAGES = [
   { name: '@vigilkit/plugin-sdk', dir: 'packages/plugin-sdk' },
   { name: '@vigilkit/media-utils', dir: 'packages/media-utils' },
+  { name: '@vigilkit/media-audio-codecs', dir: 'packages/media-audio-codecs' },
   { name: '@vigilkit/plugin-flv', dir: 'packages/plugins/flv' },
   { name: '@vigilkit/plugin-ws', dir: 'packages/plugins/ws' },
   { name: '@vigilkit/plugin-hls', dir: 'packages/plugins/hls' },
   { name: '@vigilkit/plugin-whep', dir: 'packages/plugins/whep' },
+  { name: '@vigilkit/plugin-ps', dir: 'packages/plugins/ps' },
+  { name: '@vigilkit/plugin-gb28181', dir: 'packages/plugins/gb28181' },
   { name: 'vigilkit', dir: 'packages/core' },
   { name: '@vigilkit/plugin-hevc-wasm', dir: 'packages/plugins/hevc-wasm' },
   { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
@@ -82,11 +94,14 @@ if (onlyName) {
 }
 
 // Per-package command, run with cwd = package dir. prepublishOnly builds dist.
-const PUBLISH_ARGS = ['publish', '--no-git-checks'];
+// --provenance requires OIDC (see header comment): in the release workflow the
+// runner's `id-token: write` permission supplies the sigstore identity; local
+// publishes without OIDC must drop the flag.
+const PUBLISH_ARGS = ['publish', '--no-git-checks', '--provenance'];
 
 if (dryRun) {
   console.log(
-    `[publish] plan: ${plan.length} package(s) in order (dry-run 鈥?nothing will be published)`,
+    `[publish] plan: ${plan.length} package(s) in order (dry-run 閳?nothing will be published)`,
   );
   for (const [i, pkg] of plan.entries()) {
     const dir = join(ROOT, pkg.dir);
@@ -112,21 +127,21 @@ for (const [i, pkg] of plan.entries()) {
   const cwd = join(ROOT, pkg.dir);
   const rel = relative(ROOT, cwd);
   console.log(
-    `[publish] (${i + 1}/${plan.length}) ${pkg.name}@${versionOf(pkg)} 鈥?` +
+    `[publish] (${i + 1}/${plan.length}) ${pkg.name}@${versionOf(pkg)} 閳?` +
       `pnpm ${PUBLISH_ARGS.join(' ')} (cwd: ${rel})`,
   );
   const result = runPnpm(PUBLISH_ARGS, cwd);
   printCaptured(pkg.name, result);
   if (result.error) {
     console.error(
-      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 鈥?could not run command (${result.error.message})`,
+      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 閳?could not run command (${result.error.message})`,
     );
     failures.push({ pkg, reason: result.error.message });
     break;
   }
   if (result.status !== 0) {
     console.error(
-      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 鈥?pnpm publish exited with status ${result.status}`,
+      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 閳?pnpm publish exited with status ${result.status}`,
     );
     failures.push({ pkg, reason: `exit status ${result.status}` });
     break;
@@ -135,7 +150,7 @@ for (const [i, pkg] of plan.entries()) {
 
 if (failures.length > 0) {
   const { pkg, reason } = failures[0];
-  console.error('[publish] ABORTED at first failure 鈥?nothing after this was published.');
+  console.error('[publish] ABORTED at first failure 閳?nothing after this was published.');
   console.error(`[publish]   package: ${pkg.name}@${versionOf(pkg)}`);
   console.error(
     `[publish]   command: pnpm ${PUBLISH_ARGS.join(' ')} (cwd: ${relative(ROOT, join(ROOT, pkg.dir))})`,

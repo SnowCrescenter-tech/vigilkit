@@ -1,0 +1,51 @@
+{
+  "name": "@vigilkit/media-audio-codecs",
+  "version": "0.3.0",
+  "description": "Software audio codecs for vigilkit: G.711 (mu-law / A-law) and 16-bit PCM. Zero third-party dependencies. G.726 is deferred (see DEFERRED.md).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "prepublishOnly": "pnpm build",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SnowCrescenter-tech/vigilkit.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "video",
+    "player",
+    "webcodecs",
+    "surveillance",
+    "g711",
+    "g726",
+    "adpcm",
+    "audio"
+  ]
+}

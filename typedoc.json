@@ -1,0 +1,36 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "vigilkit",
+  "entryPoints": [
+    "packages/core/src/index.ts",
+    "packages/plugin-sdk/src/index.ts",
+    "packages/media-utils/src/index.ts",
+    "packages/plugins/flv/src/index.ts",
+    "packages/plugins/ws/src/index.ts",
+    "packages/plugins/hls/src/index.ts",
+    "packages/plugins/whep/src/index.ts",
+    "packages/plugins/hevc-wasm/src/index.ts",
+    "packages/plugins/dav1d-wasm/src/index.ts",
+    "packages/plugins/hikvision/src/index.ts",
+    "packages/plugins/dahua/src/index.ts",
+    "packages/renderer/src/index.ts"
+  ],
+  "out": "docs/api/",
+  "readme": "docs/api-readme.md",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/test/**",
+    "**/tests/**",
+    "**/fixtures/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/*.d.ts"
+  ],
+  "theme": "default",
+  "tsconfig": "tsconfig.docs.json"
+}
