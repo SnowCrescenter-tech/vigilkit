@@ -128,6 +128,8 @@ WHEP is the exception to the pipeline above: it delivers already-decoded `VideoF
 | `@vigilkit/plugin-gb28181` | GB28181 signaling skeleton: SIP message parser/serializer (RFC 3261), SDP offer/answer builder (PS + G.711 payload types), and the `Gb28181Session` state machine. RTP/PS media consumption plugs into `plugin-ps`. |
 | `@vigilkit/plugin-hikvision` | Hikvision ISAPI vendor plugin: HTTP Digest auth (RFC 7616, MD5), device discovery, channel enumeration, PTZ control, and RTSP/HTTP stream URL building. Zero runtime dependencies. |
 | `@vigilkit/plugin-dahua` | Dahua CGI vendor plugin: HTTP Digest auth, device info, channel enumeration, PTZ control, and RTSP / RTSP-over-WebSocket stream URL building. Zero runtime dependencies. |
+| `@vigilkit/plugin-uniview` | Uniview (UNV) LightAPI vendor plugin: HTTP Digest auth, JSON device info / channel enumeration, PTZ control, and IPC / NVR RTSP + MJPEG stream URL building. Zero runtime dependencies. |
+| `@vigilkit/plugin-mqtt` | Zero-dependency MQTT 3.1.1 client over WebSocket (codec + client + packet stream) for IoT control and device metadata — not a media source. |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})` with WebGPU → WebGL2 → canvas2d fallback; zero-copy `importExternalTexture` in `WebGPURenderer`. |
 | `@vigilkit/example-basic` | Private example app: FLV / HLS / HEVC / WHEP demo modes, used by the e2e suite. |
 
@@ -253,19 +255,19 @@ MediaMTX then publishes WHEP at `http://localhost:8889/<stream>/whep`. Note that
 | WebGPU zero-copy rendering | 113+ | 144+ (Windows) | 26+ |
 | Canvas2d fallback | yes | yes | yes |
 
-WebGPU gracefully falls back to WebGL2, then canvas2d, via `createRendererAsync(canvas, { prefer })`. The e2e suite runs every spec against both chromium and firefox; headless Firefox has no WebGPU adapter and may fall back to canvas2d `renderMode` when WebGL2 is also unavailable.
+WebGPU gracefully falls back to WebGL2, then canvas2d, via `createRendererAsync(canvas, { prefer })`. The e2e suite runs every spec against chromium, firefox, and webkit (Playwright's WebKit project; the Safari engine's e2e job runs on a macOS runner in CI — on Windows/Linux the webkit project lacks WebCodecs, so engine-dependent specs skip there instead of failing). Headless Firefox/WebKit have no WebGPU adapter and may fall back to canvas2d `renderMode` when WebGL2 is also unavailable.
 
 ## Testing
 
 ```sh
-pnpm test            # 450 unit tests across 10 packages
-pnpm test:e2e        # Playwright e2e: 4 specs × chromium + firefox = 8 runs (FLV x2, HLS, HEVC)
+pnpm test            # unit tests across all packages
+pnpm test:e2e        # Playwright e2e: 6 specs × chromium + firefox + webkit (Safari engine)
 node scripts/check-licenses.mjs --ci   # license scan, verdict must stay PASS
 ```
 
-Run `pnpm exec playwright install chromium firefox` once before the first e2e run. The e2e suite reproduces QA against committed fixtures: an FFmpeg FATE FLV sample (`examples/basic/fixtures/`, sha256-pinned) and an FFmpeg FATE HEVC sample (`examples/basic/hevc-fixtures/paired_fields.hevc`). The v0.2 e2e evidence still holds: HLS played in headless Chromium (551 ms to first playable), HEVC soft-decode delivered frames at ~1.1 s on the main-thread path (worker path experimental via `?worker=1`, renderMode falls back to webgl2 in headless), and the v0.1 WS-FLV case still passes (203 frames at ~34 fps, 0 errors). The HEVC Node smoke test (`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`) decodes the real `paired_fields.hevc` fixture to 2 frames.
+Run `pnpm exec playwright install chromium firefox webkit` once before the first e2e run. The e2e suite reproduces QA against committed fixtures: an FFmpeg FATE FLV sample (`examples/basic/fixtures/`, sha256-pinned) and an FFmpeg FATE HEVC sample (`examples/basic/hevc-fixtures/paired_fields.hevc`). The v0.2 e2e evidence still holds: HLS played in headless Chromium (551 ms to first playable), HEVC soft-decode delivered frames at ~1.1 s on the main-thread path (worker path experimental via `?worker=1`, renderMode falls back to webgl2 in headless), and the v0.1 WS-FLV case still passes (203 frames at ~34 fps, 0 errors). The HEVC Node smoke test (`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`) decodes the real `paired_fields.hevc` fixture to 2 frames. CI runs the webkit project on a macOS runner (`e2e-safari` job) for real Safari coverage.
 
-Release tooling quick notes: `scripts/publish-all.mjs` publishes the 12 publishable packages in dependency order (`--dry-run` prints the plan without publishing, `--only <name>` resumes after a failure); `scripts/verify-pack.mjs` packs every tarball and asserts the dist entry points, no bundled `node_modules`, resolved `workspace:` versions, and LICENSE/NOTICE presence before anything reaches the registry; `.github/workflows/release.yml` wires both into a manual `workflow_dispatch` release that requires the `NPM_TOKEN` repository secret.
+Release tooling quick notes: `scripts/publish-all.mjs` publishes the 17 publishable packages in dependency order (`--dry-run` prints the plan without publishing, `--only <name>` resumes after a failure); `scripts/verify-pack.mjs` packs every tarball and asserts the dist entry points, no bundled `node_modules`, resolved `workspace:` versions, and LICENSE/NOTICE presence before anything reaches the registry; `.github/workflows/release.yml` wires both into a manual `workflow_dispatch` release that requires the `NPM_TOKEN` repository secret.
 
 `pnpm notices` regenerates [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) from the installed dependency tree. `pnpm run sbom` regenerates the SBOM ([SBOM.md](SBOM.md) + [sbom.spdx.json](sbom.spdx.json), SPDX 2.3) from the same license-scan data (note: pnpm's builtin `sbom` command shadows the script name, so use `pnpm run sbom`).
 

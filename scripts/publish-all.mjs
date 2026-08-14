@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publishes every publishable vigilkit package, in dependency order.
 //
-//   node scripts/publish-all.mjs                      # publish all 15 packages, in order
+//   node scripts/publish-all.mjs                      # publish all 17 packages, in order
 //   node scripts/publish-all.mjs --dry-run            # print the ordered plan, publish nothing
 //   node scripts/publish-all.mjs --only <name>        # publish a single package only (resume)
 //   node scripts/publish-all.mjs --only @vigilkit/plugin-flv --dry-run
@@ -13,7 +13,7 @@
 // published tarball (supply-chain integrity: consumers can verify the package
 // was built and published by the vigilkit GitHub Actions release workflow).
 // Requirements: the publishing runner must provide an OIDC token (GitHub
-// Actions `permissions: id-token: write` 鈥?see .github/workflows/release.yml)
+// Actions `permissions: id-token: write` 閳?see .github/workflows/release.yml)
 // and npm >= 9.5 / pnpm >= 8.x. Fallback: a LOCAL `pnpm publish` has no OIDC
 // identity, so provenance is only produced by the release workflow; drop
 // --provenance for any manual, out-of-band publish.
@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Ordered publish list. ORDER MATTERS 閳?it encodes the dependency edges:
+// Ordered publish list. ORDER MATTERS 闁?it encodes the dependency edges:
 //   plugin-sdk <- {flv, ws, hls, core}; media-utils <- {flv, hls};
 //   core (vigilkit) <- {hevc-wasm, renderer}.
 const PACKAGES = [
@@ -48,6 +48,8 @@ const PACKAGES = [
   { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
   { name: '@vigilkit/plugin-hikvision', dir: 'packages/plugins/hikvision' },
   { name: '@vigilkit/plugin-dahua', dir: 'packages/plugins/dahua' },
+  { name: '@vigilkit/plugin-uniview', dir: 'packages/plugins/uniview' },
+  { name: '@vigilkit/plugin-mqtt', dir: 'packages/plugins/mqtt' },
   { name: '@vigilkit/renderer', dir: 'packages/renderer' },
 ];
 
@@ -101,7 +103,7 @@ const PUBLISH_ARGS = ['publish', '--no-git-checks', '--provenance'];
 
 if (dryRun) {
   console.log(
-    `[publish] plan: ${plan.length} package(s) in order (dry-run 閳?nothing will be published)`,
+    `[publish] plan: ${plan.length} package(s) in order (dry-run 闁?nothing will be published)`,
   );
   for (const [i, pkg] of plan.entries()) {
     const dir = join(ROOT, pkg.dir);
@@ -127,21 +129,21 @@ for (const [i, pkg] of plan.entries()) {
   const cwd = join(ROOT, pkg.dir);
   const rel = relative(ROOT, cwd);
   console.log(
-    `[publish] (${i + 1}/${plan.length}) ${pkg.name}@${versionOf(pkg)} 閳?` +
+    `[publish] (${i + 1}/${plan.length}) ${pkg.name}@${versionOf(pkg)} 闁?` +
       `pnpm ${PUBLISH_ARGS.join(' ')} (cwd: ${rel})`,
   );
   const result = runPnpm(PUBLISH_ARGS, cwd);
   printCaptured(pkg.name, result);
   if (result.error) {
     console.error(
-      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 閳?could not run command (${result.error.message})`,
+      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 闁?could not run command (${result.error.message})`,
     );
     failures.push({ pkg, reason: result.error.message });
     break;
   }
   if (result.status !== 0) {
     console.error(
-      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 閳?pnpm publish exited with status ${result.status}`,
+      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 闁?pnpm publish exited with status ${result.status}`,
     );
     failures.push({ pkg, reason: `exit status ${result.status}` });
     break;
@@ -150,7 +152,7 @@ for (const [i, pkg] of plan.entries()) {
 
 if (failures.length > 0) {
   const { pkg, reason } = failures[0];
-  console.error('[publish] ABORTED at first failure 閳?nothing after this was published.');
+  console.error('[publish] ABORTED at first failure 闁?nothing after this was published.');
   console.error(`[publish]   package: ${pkg.name}@${versionOf(pkg)}`);
   console.error(
     `[publish]   command: pnpm ${PUBLISH_ARGS.join(' ')} (cwd: ${relative(ROOT, join(ROOT, pkg.dir))})`,

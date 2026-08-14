@@ -128,6 +128,8 @@ WHEP 是上述管线的例外：它以 `frame` 事件直接投递已解码的 `V
 | `@vigilkit/plugin-gb28181` | GB28181 信令骨架：SIP 消息解析/序列化（RFC 3261）、SDP offer/answer 构建（PS + G.711 载荷类型）、`Gb28181Session` 状态机。RTP/PS 媒体消费接入 `plugin-ps`。 |
 | `@vigilkit/plugin-hikvision` | 海康 ISAPI 厂商插件：HTTP Digest 认证（RFC 7616、MD5）、设备发现、通道枚举、云台控制、RTSP/HTTP 流地址构建。零运行时依赖。 |
 | `@vigilkit/plugin-dahua` | 大华 CGI 厂商插件：HTTP Digest 认证、设备信息、通道枚举、云台控制、RTSP / RTSP-over-WebSocket 流地址构建。零运行时依赖。 |
+| `@vigilkit/plugin-uniview` | 宇视（UNV）LightAPI 厂商插件：HTTP Digest 认证、JSON 设备信息 / 通道枚举、云台控制、IPC / NVR RTSP + MJPEG 流地址构建。零运行时依赖。 |
+| `@vigilkit/plugin-mqtt` | 零依赖 MQTT 3.1.1 WebSocket 客户端（编解码 + 客户端 + 包流），用于 IoT 控制与设备元数据 —— 非媒体源。 |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})`，WebGPU → WebGL2 → canvas2d 依次回退；`WebGPURenderer` 零拷贝 `importExternalTexture`。 |
 | `@vigilkit/example-basic` | 私有示例应用：FLV / HLS / HEVC / WHEP 四种演示模式，供 e2e 套件使用。 |
 
@@ -251,19 +253,19 @@ docker run -p 8889:8889 -p 8554:8554 bluenviron/mediamtx
 | WebGPU 零拷贝渲染 | 113+ | 144+（仅 Windows） | 26+ |
 | Canvas2d 回退 | 支持 | 支持 | 支持 |
 
-WebGPU 通过 `createRendererAsync(canvas, { prefer })` 优雅回退到 WebGL2，再回退到 canvas2d。e2e 套件对每个用例同时跑 chromium 与 firefox；headless Firefox 没有 WebGPU 适配器，在 WebGL2 也不可用时 `renderMode` 可能回退到 canvas2d。
+WebGPU 通过 `createRendererAsync(canvas, { prefer })` 优雅回退到 WebGL2，再回退到 canvas2d。e2e 套件对每个用例同时跑 chromium、firefox 与 webkit（Playwright 的 WebKit 项目；真实 Safari 引擎的 e2e 在 CI 的 macOS runner 上运行 —— Windows/Linux 上的 webkit 项目缺少 WebCodecs，引擎相关用例在那里会跳过而非失败）。headless Firefox/WebKit 没有 WebGPU 适配器，在 WebGL2 也不可用时 `renderMode` 可能回退到 canvas2d。
 
 ## 测试
 
 ```sh
-pnpm test            # 10 个包共 450 个单元测试
-pnpm test:e2e        # Playwright e2e：4 个用例 × chromium + firefox = 8 次运行（FLV x2、HLS、HEVC）
+pnpm test            # 全部包单元测试
+pnpm test:e2e        # Playwright e2e：6 个用例 × chromium + firefox + webkit（Safari 引擎）
 node scripts/check-licenses.mjs --ci   # 许可证扫描，结论必须保持 PASS
 ```
 
-首次运行 e2e 前先执行 `pnpm exec playwright install chromium firefox`。e2e 套件基于已提交的测试样本复现 QA：FFmpeg FATE FLV 样例（`examples/basic/fixtures/`，sha256 锁定）与 FFmpeg FATE HEVC 样例（`examples/basic/hevc-fixtures/paired_fields.hevc`）。v0.2 的 e2e 实测仍然成立：HLS 在 headless Chromium 中播放（551 ms 达首帧可播）；HEVC 软解在主线程路径约 1.1 s 出帧（worker 路径经 `?worker=1` 实验性启用，headless 下 renderMode 回退到 webgl2）；v0.1 的 WS-FLV 用例保持通过（203 帧、约 34 fps、0 错误）。HEVC Node smoke 测试（`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`）用真实 `paired_fields.hevc` 样本解出 2 帧。
+首次运行 e2e 前先执行 `pnpm exec playwright install chromium firefox webkit`。e2e 套件基于已提交的测试样本复现 QA：FFmpeg FATE FLV 样例（`examples/basic/fixtures/`，sha256 锁定）与 FFmpeg FATE HEVC 样例（`examples/basic/hevc-fixtures/paired_fields.hevc`）。v0.2 的 e2e 实测仍然成立：HLS 在 headless Chromium 中播放（551 ms 达首帧可播）；HEVC 软解在主线程路径约 1.1 s 出帧（worker 路径经 `?worker=1` 实验性启用，headless 下 renderMode 回退到 webgl2）；v0.1 的 WS-FLV 用例保持通过（203 帧、约 34 fps、0 错误）。HEVC Node smoke 测试（`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`）用真实 `paired_fields.hevc` 样本解出 2 帧。CI 在 macOS runner 上运行 webkit 项目（`e2e-safari` job）以获得真实 Safari 覆盖。
 
-发布工具链速览：`scripts/publish-all.mjs` 按依赖顺序发布 12 个可发布包（`--dry-run` 只打印计划不发布，`--only <name>` 可在失败后续跑）；`scripts/verify-pack.mjs` 对每个包实际打 tar 包并断言 dist 入口、tarball 内无 `node_modules`、`workspace:` 协议已解析、LICENSE/NOTICE 存在，全部通过才会触达 registry；`.github/workflows/release.yml` 把两者接入手动触发的 `workflow_dispatch` 发布流程，需要 `NPM_TOKEN` 仓库密钥。
+发布工具链速览：`scripts/publish-all.mjs` 按依赖顺序发布 17 个可发布包（`--dry-run` 只打印计划不发布，`--only <name>` 可在失败后续跑）；`scripts/verify-pack.mjs` 对每个包实际打 tar 包并断言 dist 入口、tarball 内无 `node_modules`、`workspace:` 协议已解析、LICENSE/NOTICE 存在，全部通过才会触达 registry；`.github/workflows/release.yml` 把两者接入手动触发的 `workflow_dispatch` 发布流程，需要 `NPM_TOKEN` 仓库密钥。
 
 `pnpm notices` 会根据已安装的依赖树重新生成 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。`pnpm run sbom` 基于同一份许可证扫描数据重新生成 SBOM（[SBOM.md](SBOM.md) 与 [sbom.spdx.json](sbom.spdx.json)，SPDX 2.3）（注意：pnpm 内置的 `sbom` 命令会遮蔽同名脚本，请使用 `pnpm run sbom`）。
 

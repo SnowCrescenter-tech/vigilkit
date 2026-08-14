@@ -1,0 +1,16 @@
+vigilkit plugin-mqtt
+
+This product includes software developed by vigilkit contributors
+(https://github.com/SnowCrescenter-tech/vigilkit). This package is licensed
+under the Apache License 2.0; see LICENSE.
+
+The MQTT 3.1.1 protocol (packet formats, flag layouts, and the QoS 0/1/2
+delivery semantics) is implemented from the OASIS public specification
+"MQTT Version 3.1.1" (OASIS Standard, 29 October 2014). No third-party MQTT
+implementation, SDK binary, or source code is vendored, copied, or linked
+into this package; it has zero runtime dependencies. WebSocket transport is
+provided by the host runtime's native WebSocket API.
+
+The Apache-2.0 license applies only to the code written by vigilkit
+contributors; it does not apply to the MQTT specification itself or to any
+broker software this client may connect to.

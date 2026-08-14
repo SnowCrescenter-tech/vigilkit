@@ -66,6 +66,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { probeWebCodecs } from './probes.js';
 
 interface HevcStatsShape {
   framesDecoded: number;
@@ -213,18 +214,26 @@ test('soft-decodes HEVC via libde265 worker and renders frames', async ({ page }
   // beyond the 60s config timeout (plus one reload retry).
   test.setTimeout(180_000);
   const project = testInfo.project.name;
-  // Headless Firefox: no WebGPU, unreliable WebGL2 -> canvas2d fallback.
+  // Headless Firefox/WebKit: no WebGPU, unreliable WebGL2 -> canvas2d fallback.
   const allowedRenderModes =
-    project === 'firefox' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
+    project !== 'chromium' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
 
-  // Conditional, project-scoped skip: only firefox can lack I420 VideoFrame
-  // support; chromium always supports it. The probe constructs a real I420
+  // Conditional, project-scoped skip: only chromium can always rely on I420
+  // VideoFrame; firefox/webkit may lack it. The probe constructs a real I420
   // frame, so the skip engages ONLY when the soft-decode path's frame
   // delivery cannot work in this build. If the probe passes, the spec runs
   // in full (no unnecessary skip).
   test.skip(
-    project === 'firefox' && !(await probeVideoFrameI420(page)),
-    'HEVC VideoFrame I420 construction unsupported in this firefox build',
+    project !== 'chromium' && !(await probeVideoFrameI420(page)),
+    'HEVC VideoFrame I420 construction unsupported in this firefox/webkit build',
+  );
+
+  // Windows Playwright WebKit builds historically lack WebCodecs entirely,
+  // while macOS Safari 16.4+ has it — CI runs the webkit project on macOS.
+  const webcodecs = await probeWebCodecs(page);
+  test.skip(
+    project === 'webkit' && !webcodecs,
+    'WebCodecs unavailable in this webkit build (Safari e2e runs on macOS)',
   );
 
   await page.addInitScript(HIDE_WEBGPU);

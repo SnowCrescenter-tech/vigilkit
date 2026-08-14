@@ -1,0 +1,15 @@
+vigilkit plugin-uniview
+
+This product includes software developed by vigilkit contributors
+(https://github.com/SnowCrescenter-tech/vigilkit). This package is licensed
+under the Apache License 2.0; see LICENSE.
+
+The Uniview LightAPI protocol (the /LAPI/V1.0 endpoints), the RTSP URL
+templates (/media/videoN, /unicast/cN/sN/live), and the MJPEG/snapshot paths
+(/video/mjpeg/streamN, /images/snapshot.jpg) are implemented from public
+protocol documentation (see docs/vendor-sdk-research.md section 3). No Uniview
+SDK binaries and no third-party source code are vendored, copied, or linked
+into this package; it has zero runtime dependencies.
+
+The Apache-2.0 license applies only to the code written by vigilkit
+contributors; it does not apply to any Uniview device firmware or SDK.

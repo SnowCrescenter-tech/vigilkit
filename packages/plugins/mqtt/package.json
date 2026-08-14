@@ -1,0 +1,51 @@
+{
+  "name": "@vigilkit/plugin-mqtt",
+  "version": "0.3.0",
+  "description": "MQTT 3.1.1 client plugin for vigilkit: zero-dependency MQTT over WebSocket for IoT control, event triggers, and device metadata",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "prepublishOnly": "pnpm build",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SnowCrescenter-tech/vigilkit.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "mqtt",
+    "mqtt-3.1.1",
+    "iot",
+    "websocket",
+    "control",
+    "telemetry",
+    "surveillance",
+    "vigilkit"
+  ]
+}

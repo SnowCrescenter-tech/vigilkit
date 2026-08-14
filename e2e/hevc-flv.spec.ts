@@ -36,6 +36,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { probeWebCodecs } from './probes.js';
 
 interface PlayerStatsShape {
   state: string;
@@ -145,9 +146,9 @@ async function waitForDecodeCount(page: Page, count: number, timeoutMs: number):
 test('plays HEVC end-to-end through createPlayer over WS-FLV', async ({ page }, testInfo) => {
   test.setTimeout(180_000);
   const project = testInfo.project.name;
-  // Headless Firefox: no WebGPU, unreliable WebGL2 -> canvas2d fallback.
+  // Headless Firefox/WebKit: no WebGPU, unreliable WebGL2 -> canvas2d fallback.
   const allowedRenderModes =
-    project === 'firefox' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
+    project !== 'chromium' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
 
   await page.addInitScript(HIDE_WEBGPU);
   const consoleLines: string[] = [];
@@ -160,6 +161,15 @@ test('plays HEVC end-to-end through createPlayer over WS-FLV', async ({ page }, 
   try {
     await page.goto(HEVC_FLV_URL);
     await expect(page.locator('#screen')).toBeVisible();
+
+    // Windows Playwright WebKit builds historically lack WebCodecs entirely,
+    // while macOS Safari 16.4+ has it — CI runs the webkit project on macOS.
+    const webcodecs = await probeWebCodecs(page);
+    test.skip(
+      project === 'webkit' && !webcodecs,
+      'WebCodecs unavailable in this webkit build (Safari e2e runs on macOS)',
+    );
+
     await waitForVigilkit(page, 30_000);
     await page.click('#connect');
 

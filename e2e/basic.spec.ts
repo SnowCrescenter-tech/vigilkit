@@ -36,6 +36,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { probeWebCodecs } from './probes.js';
 
 interface PlayerStatsShape {
   state: string;
@@ -177,13 +178,13 @@ async function sampleCanvasPixelSum(page: Page): Promise<number> {
 
 test('plays WS-FLV stream with WebCodecs and renders frames', async ({ page }, testInfo) => {
   const project = testInfo.project.name;
-  // Headless Firefox: no WebGPU, WebGL2 unreliable -> canvas2d is the
+  // Headless Firefox/WebKit: no WebGPU, WebGL2 unreliable -> canvas2d is the
   // documented fallback; software rendering needs looser decode bounds.
   const allowedRenderModes =
-    project === 'firefox' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
-  const fpsFloor = project === 'firefox' ? 2 : 4;
-  const framesFloor = project === 'firefox' ? 5 : 20;
-  const fullClipFloor = project === 'firefox' ? 5 : 30;
+    project !== 'chromium' ? ['webgl2', 'webgpu', 'canvas2d'] : ['webgl2', 'webgpu'];
+  const fpsFloor = project !== 'chromium' ? 2 : 4;
+  const framesFloor = project !== 'chromium' ? 5 : 20;
+  const fullClipFloor = project !== 'chromium' ? 5 : 30;
 
   const consoleLines: string[] = [];
   const pageErrors: string[] = [];
@@ -195,10 +196,14 @@ test('plays WS-FLV stream with WebCodecs and renders frames', async ({ page }, t
     await page.goto(BASE_URL);
     await expect(page.locator('#screen')).toBeVisible();
 
-    const webcodecs = await page.evaluate(() => {
-      const api = (window as unknown as WindowWithVigilkit).__vigilkit;
-      return api.supports.webcodecs;
-    });
+    const webcodecs = await probeWebCodecs(page);
+    // Windows Playwright WebKit builds historically lack WebCodecs entirely,
+    // while macOS Safari 16.4+ has it — CI runs the webkit project on macOS.
+    // Skip (not fail) the engine-dependent spec on webkit without WebCodecs.
+    test.skip(
+      project === 'webkit' && !webcodecs,
+      'WebCodecs unavailable in this webkit build (Safari e2e runs on macOS)',
+    );
     expect(webcodecs).toBe(true);
 
     await page.click('#connect');
@@ -327,12 +332,21 @@ test('plays WS-FLV stream with WebCodecs and renders frames', async ({ page }, t
   }
 });
 
-test('tears down cleanly on disconnect (stopped state, no further decode)', async ({ page }) => {
+test('tears down cleanly on disconnect (stopped state, no further decode)', async ({ page }, testInfo) => {
   // NOTE: this test deliberately does not gate on framesDecoded > 0 or
   // errors.length === 0: the open Annex-B/AVCC decoder defect makes the
   // player surface a DECODE error while the WS lifecycle itself is intact.
   // This test locks the transport/teardown surface, which works today.
   await page.goto(BASE_URL);
+
+  // Windows Playwright WebKit builds historically lack WebCodecs entirely,
+  // while macOS Safari 16.4+ has it — CI runs the webkit project on macOS.
+  const webcodecs = await probeWebCodecs(page);
+  test.skip(
+    testInfo.project.name === 'webkit' && !webcodecs,
+    'WebCodecs unavailable in this webkit build (Safari e2e runs on macOS)',
+  );
+
   await page.click('#connect');
   await waitForPlayerState(page, 'playing', 20000);
 

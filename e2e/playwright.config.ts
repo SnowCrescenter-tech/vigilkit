@@ -12,15 +12,17 @@ export default defineConfig({
   // so cap the suite at two concurrent pages.
   workers: 2,
   use: { headless: true, viewport: { width: 960, height: 640 } },
-  // Two projects: chromium (baseline) and firefox. Each spec reads
-  // testInfo.project.name ('chromium' | 'firefox') to apply project-aware
-  // bounds: headless Firefox has unreliable WebGL2 (falls back to canvas2d)
-  // and slower software rendering, and its WebCodecs H.264 decode is
-  // functional but looser-bounded in e2e. Both projects share the same
-  // webServer (the FLV/HLS/HEVC fixture server on :8090).
+  // Three projects: chromium (baseline), firefox, and webkit (Safari engine).
+  // Each spec reads testInfo.project.name ('chromium' | 'firefox' | 'webkit')
+  // to apply project-aware bounds: headless Firefox and WebKit have no
+  // WebGPU, unreliable WebGL2 (fall back to canvas2d) and slower software
+  // rendering, and their WebCodecs H.264 decode is functional but looser-
+  // bounded in e2e. All projects share the same webServer (the FLV/HLS/HEVC
+  // fixture server on :8090).
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
     { name: 'firefox', use: { browserName: 'firefox' } },
+    { name: 'webkit', use: { browserName: 'webkit' } },
   ],
   webServer: {
     // --loop keeps the WS /live stream repeating: the FLV fixture (11.6 s,
