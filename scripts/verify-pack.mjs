@@ -156,6 +156,18 @@ function verify(pkg) {
     const leftover = workspaceRefs(manifest);
     for (const ref of leftover) problems.push(`workspace: protocol still present (${ref})`);
 
+    // (d) LICENSE must ship in every tarball (npm auto-includes it, but only
+    // if a LICENSE file exists in the package — assert it made it in). The
+    // wasm adapter packages also carry a NOTICE with third-party attribution
+    // (LGPL-3.0 source offer for libde265, BSD/CC0 for dav1d); it is NOT
+    // auto-included by npm, so the `files` array must list it — assert it.
+    if (!existsSync(join(packageRoot, 'LICENSE'))) problems.push('LICENSE missing from tarball');
+    if (pkg.name === '@vigilkit/plugin-hevc-wasm' || pkg.name === '@vigilkit/plugin-dav1d-wasm') {
+      if (!existsSync(join(packageRoot, 'NOTICE'))) {
+        problems.push('NOTICE missing from tarball (third-party attribution must ship)');
+      }
+    }
+
     return { problems, tgz };
   } catch (error) {
     problems.push(`verification threw: ${error.message}`);

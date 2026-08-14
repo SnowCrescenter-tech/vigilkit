@@ -32,7 +32,8 @@ jobs:
       # verify-pack asserts every tarball is publishable (dist present, no
       # node_modules, workspace:* resolved) BEFORE anything reaches the registry.
       - run: node scripts/verify-pack.mjs
-      # publish-all publishes the 8 packages in dependency order
+      # publish-all publishes the 11 packages in dependency order
       # (plugin-sdk -> media-utils -> plugin-flv -> plugin-ws -> plugin-hls ->
-      # vigilkit -> plugin-hevc-wasm -> renderer), aborting on the first failure.
+      # plugin-whep -> vigilkit -> plugin-hevc-wasm -> plugin-dav1d-wasm ->
+      # plugin-hikvision -> renderer), aborting on the first failure.
       - run: node scripts/publish-all.mjs

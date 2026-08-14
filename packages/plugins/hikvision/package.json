@@ -1,6 +1,6 @@
 {
   "name": "@vigilkit/plugin-hikvision",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Hikvision ISAPI plugin for vigilkit: digest auth, device discovery, channel enumeration, PTZ control, and stream URL building",
   "type": "module",
   "license": "Apache-2.0",
@@ -13,7 +13,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "test": "vitest run",
@@ -34,5 +36,12 @@
   "engines": {
     "node": ">=20"
   },
-  "keywords": ["video", "player", "webcodecs", "surveillance", "hikvision", "isapi"]
+  "keywords": [
+    "video",
+    "player",
+    "webcodecs",
+    "surveillance",
+    "hikvision",
+    "isapi"
+  ]
 }
