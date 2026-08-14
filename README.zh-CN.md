@@ -120,6 +120,7 @@ WHEP 是上述管线的例外：它以 `frame` 事件直接投递已解码的 `V
 | `@vigilkit/plugin-dav1d-wasm` | AV1 WASM 软解适配器（CC0/BSD dav1d.js 封装 vendored dav1d 产物），实现 `VideoCodecDecoder`，与 HEVC 插件相同的「产物隔离 + sha256 锁定加载器」模式。 |
 | `@vigilkit/plugin-whep` | WHEP（WebRTC-HTTP Egress Protocol）media source 插件：POST offer / PATCH answer + trickle ICE，以直接 `frame` 事件投递已解码的 `VideoFrame`（绕过编码解码链）；另支持 insertable-streams 编码路径（仅 Chromium）。 |
 | `@vigilkit/plugin-hikvision` | 海康 ISAPI 厂商插件：HTTP Digest 认证（RFC 7616、MD5）、设备发现、通道枚举、云台控制、RTSP/HTTP 流地址构建。零运行时依赖。 |
+| `@vigilkit/plugin-dahua` | 大华 CGI 厂商插件：HTTP Digest 认证、设备信息、通道枚举、云台控制、RTSP / RTSP-over-WebSocket 流地址构建。零运行时依赖。 |
 | `@vigilkit/renderer` | `createRendererAsync(canvas, {prefer})`，WebGPU → WebGL2 → canvas2d 依次回退；`WebGPURenderer` 零拷贝 `importExternalTexture`。 |
 | `@vigilkit/example-basic` | 私有示例应用：FLV / HLS / HEVC / WHEP 四种演示模式，供 e2e 套件使用。 |
 
@@ -255,7 +256,7 @@ node scripts/check-licenses.mjs --ci   # 许可证扫描，结论必须保持 PA
 
 首次运行 e2e 前先执行 `pnpm exec playwright install chromium firefox`。e2e 套件基于已提交的测试样本复现 QA：FFmpeg FATE FLV 样例（`examples/basic/fixtures/`，sha256 锁定）与 FFmpeg FATE HEVC 样例（`examples/basic/hevc-fixtures/paired_fields.hevc`）。v0.2 的 e2e 实测仍然成立：HLS 在 headless Chromium 中播放（551 ms 达首帧可播）；HEVC 软解在主线程路径约 1.1 s 出帧（worker 路径经 `?worker=1` 实验性启用，headless 下 renderMode 回退到 webgl2）；v0.1 的 WS-FLV 用例保持通过（203 帧、约 34 fps、0 错误）。HEVC Node smoke 测试（`pnpm --filter @vigilkit/plugin-hevc-wasm smoke`）用真实 `paired_fields.hevc` 样本解出 2 帧。
 
-发布工具链速览：`scripts/publish-all.mjs` 按依赖顺序发布 11 个可发布包（`--dry-run` 只打印计划不发布，`--only <name>` 可在失败后续跑）；`scripts/verify-pack.mjs` 对每个包实际打 tar 包并断言 dist 入口、tarball 内无 `node_modules`、`workspace:` 协议已解析、LICENSE/NOTICE 存在，全部通过才会触达 registry；`.github/workflows/release.yml` 把两者接入手动触发的 `workflow_dispatch` 发布流程，需要 `NPM_TOKEN` 仓库密钥。
+发布工具链速览：`scripts/publish-all.mjs` 按依赖顺序发布 12 个可发布包（`--dry-run` 只打印计划不发布，`--only <name>` 可在失败后续跑）；`scripts/verify-pack.mjs` 对每个包实际打 tar 包并断言 dist 入口、tarball 内无 `node_modules`、`workspace:` 协议已解析、LICENSE/NOTICE 存在，全部通过才会触达 registry；`.github/workflows/release.yml` 把两者接入手动触发的 `workflow_dispatch` 发布流程，需要 `NPM_TOKEN` 仓库密钥。
 
 `pnpm notices` 会根据已安装的依赖树重新生成 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 

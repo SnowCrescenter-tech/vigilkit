@@ -81,6 +81,12 @@ importers:
 
   packages/plugin-sdk: {}
 
+  packages/plugins/dahua:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+
   packages/plugins/dav1d-wasm:
     dependencies:
       '@vigilkit/plugin-sdk':

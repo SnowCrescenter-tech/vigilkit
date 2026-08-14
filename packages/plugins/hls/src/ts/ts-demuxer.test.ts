@@ -5,6 +5,10 @@ import type { DemuxerEvent } from '@vigilkit/plugin-sdk';
 import { TsDemuxer } from './ts-demuxer.js';
 import {
   AUDIO_PID,
+  HEVC_IDR,
+  HEVC_PPS,
+  HEVC_VIDEO_PID,
+  HEVC_VPS,
   IDR,
   PMT_PID,
   PPS,
@@ -20,6 +24,7 @@ import {
   pesHeader,
   pesPacket,
   pmtSection,
+  pmtSectionHevc,
   psiPackets,
   readU32BE,
   tsPacket,
@@ -236,6 +241,56 @@ describe('TsDemuxer', () => {
     // The demuxer is marked failed: further packets must not be processed.
     const videos = events.filter((event): event is VideoEvent => event.type === 'video');
     expect(videos).toHaveLength(0);
+  });
+
+  it('garbage H.264 parameter sets emit a DEMUX error instead of throwing', () => {
+    const demuxer = new TsDemuxer();
+    const events = collect(demuxer);
+    // A structurally valid PES carrying a 1-byte SPS NALU (type 7), a valid
+    // PPS and a VCL NALU: codecStringFromSps rejects an SPS shorter than 4
+    // bytes. The failure must surface as an error event — never a synchronous
+    // throw out of push()/flush().
+    const garbageSps = annexBNalu(new Uint8Array([0x67]));
+    const es = concat(garbageSps, annexBNalu(PPS), annexBNalu(IDR));
+    demuxer.push(
+      concat(
+        psiPackets(patSection(PMT_PID), 0),
+        psiPackets(pmtSection(VIDEO_PID, AUDIO_PID), PMT_PID),
+        pesPacket(VIDEO_PID, 0xe0, es, 90000),
+      ),
+    );
+    expect(() => demuxer.flush()).not.toThrow();
+    const errors = events.filter((event): event is Extract<DemuxerEvent, { type: 'error' }> => event.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.error.code).toBe('DEMUX');
+    demuxer.close();
+  });
+
+  it('garbage HEVC parameter sets emit a DEMUX error instead of throwing', () => {
+    const demuxer = new TsDemuxer();
+    const events = collect(demuxer);
+    // VPS/PPS are well-formed but the SPS is truncated to a single byte:
+    // buildHvcC -> parseHevcSps rejects it. The failure must surface as an
+    // error event — never a synchronous throw out of push()/flush().
+    const badSps = annexBNalu(new Uint8Array([0x42]));
+    const es = concat(
+      annexBNalu(HEVC_VPS),
+      badSps,
+      annexBNalu(HEVC_PPS),
+      annexBNalu(HEVC_IDR),
+    );
+    demuxer.push(
+      concat(
+        psiPackets(patSection(PMT_PID), 0),
+        psiPackets(pmtSectionHevc(HEVC_VIDEO_PID), PMT_PID),
+        pesPacket(HEVC_VIDEO_PID, 0xe0, es, 90000),
+      ),
+    );
+    expect(() => demuxer.flush()).not.toThrow();
+    const errors = events.filter((event): event is Extract<DemuxerEvent, { type: 'error' }> => event.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.error.code).toBe('DEMUX');
+    demuxer.close();
   });
 
   it('a PES split across three packets reassembles into one video chunk', () => {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publishes every publishable vigilkit package, in dependency order.
 //
-//   node scripts/publish-all.mjs                      # publish all 11 packages, in order
+//   node scripts/publish-all.mjs                      # publish all 12 packages, in order
 //   node scripts/publish-all.mjs --dry-run            # print the ordered plan, publish nothing
 //   node scripts/publish-all.mjs --only <name>        # publish a single package only (resume)
 //   node scripts/publish-all.mjs --only @vigilkit/plugin-flv --dry-run
@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Ordered publish list. ORDER MATTERS — it encodes the dependency edges:
+// Ordered publish list. ORDER MATTERS 鈥?it encodes the dependency edges:
 //   plugin-sdk <- {flv, ws, hls, core}; media-utils <- {flv, hls};
 //   core (vigilkit) <- {hevc-wasm, renderer}.
 const PACKAGES = [
@@ -35,6 +35,7 @@ const PACKAGES = [
   { name: '@vigilkit/plugin-hevc-wasm', dir: 'packages/plugins/hevc-wasm' },
   { name: '@vigilkit/plugin-dav1d-wasm', dir: 'packages/plugins/dav1d-wasm' },
   { name: '@vigilkit/plugin-hikvision', dir: 'packages/plugins/hikvision' },
+  { name: '@vigilkit/plugin-dahua', dir: 'packages/plugins/dahua' },
   { name: '@vigilkit/renderer', dir: 'packages/renderer' },
 ];
 
@@ -85,7 +86,7 @@ const PUBLISH_ARGS = ['publish', '--no-git-checks'];
 
 if (dryRun) {
   console.log(
-    `[publish] plan: ${plan.length} package(s) in order (dry-run — nothing will be published)`,
+    `[publish] plan: ${plan.length} package(s) in order (dry-run 鈥?nothing will be published)`,
   );
   for (const [i, pkg] of plan.entries()) {
     const dir = join(ROOT, pkg.dir);
@@ -111,21 +112,21 @@ for (const [i, pkg] of plan.entries()) {
   const cwd = join(ROOT, pkg.dir);
   const rel = relative(ROOT, cwd);
   console.log(
-    `[publish] (${i + 1}/${plan.length}) ${pkg.name}@${versionOf(pkg)} — ` +
+    `[publish] (${i + 1}/${plan.length}) ${pkg.name}@${versionOf(pkg)} 鈥?` +
       `pnpm ${PUBLISH_ARGS.join(' ')} (cwd: ${rel})`,
   );
   const result = runPnpm(PUBLISH_ARGS, cwd);
   printCaptured(pkg.name, result);
   if (result.error) {
     console.error(
-      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} — could not run command (${result.error.message})`,
+      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 鈥?could not run command (${result.error.message})`,
     );
     failures.push({ pkg, reason: result.error.message });
     break;
   }
   if (result.status !== 0) {
     console.error(
-      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} — pnpm publish exited with status ${result.status}`,
+      `[publish] FAILED: ${pkg.name}@${versionOf(pkg)} 鈥?pnpm publish exited with status ${result.status}`,
     );
     failures.push({ pkg, reason: `exit status ${result.status}` });
     break;
@@ -134,7 +135,7 @@ for (const [i, pkg] of plan.entries()) {
 
 if (failures.length > 0) {
   const { pkg, reason } = failures[0];
-  console.error('[publish] ABORTED at first failure — nothing after this was published.');
+  console.error('[publish] ABORTED at first failure 鈥?nothing after this was published.');
   console.error(`[publish]   package: ${pkg.name}@${versionOf(pkg)}`);
   console.error(
     `[publish]   command: pnpm ${PUBLISH_ARGS.join(' ')} (cwd: ${relative(ROOT, join(ROOT, pkg.dir))})`,

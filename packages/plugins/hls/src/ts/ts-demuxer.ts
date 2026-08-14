@@ -189,20 +189,32 @@ export class TsDemuxer implements Demuxer {
     }
     if (!hasVcl) return;
 
-    if (streamType === STREAM_VIDEO_HEVC) {
-      if (!this.hasHevcSeqHeader && this.vps !== null && this.sps !== null && this.pps !== null) {
-        const description = buildHvcC({ vps: this.vps, sps: this.sps, pps: this.pps, lengthSizeMinusOne: 3 });
-        this.hasHevcSeqHeader = true;
-        this.emit({ type: 'sequence-header', config: { codec: parseHvcC(description).codec, description } });
+    try {
+      if (streamType === STREAM_VIDEO_HEVC) {
+        if (!this.hasHevcSeqHeader && this.vps !== null && this.sps !== null && this.pps !== null) {
+          const description = buildHvcC({ vps: this.vps, sps: this.sps, pps: this.pps, lengthSizeMinusOne: 3 });
+          this.hasHevcSeqHeader = true;
+          this.emit({ type: 'sequence-header', config: { codec: parseHvcC(description).codec, description } });
+        }
+        if (!this.hasHevcSeqHeader) return;
+      } else if (!this.hasSeqHeader) {
+        if (this.sps === null || this.pps === null) return;
+        this.hasSeqHeader = true;
+        this.emit({
+          type: 'sequence-header',
+          config: { codec: codecStringFromSps(this.sps), description: buildAvcC(this.sps, this.pps, 4) },
+        });
       }
-      if (!this.hasHevcSeqHeader) return;
-    } else if (!this.hasSeqHeader) {
-      if (this.sps === null || this.pps === null) return;
-      this.hasSeqHeader = true;
-      this.emit({
-        type: 'sequence-header',
-        config: { codec: codecStringFromSps(this.sps), description: buildAvcC(this.sps, this.pps, 4) },
-      });
+    } catch (error) {
+      // A parameter-set NALU can carry the right NAL type yet contain garbage
+      // the config builders reject (e.g. an SPS shorter than 4 bytes, which
+      // codecStringFromSps / parseHevcSps refuse). Surface it as a DEMUX error
+      // event instead of leaking a synchronous throw out of push()/flush().
+      if (error instanceof MediaFormatError) {
+        this.failDemux(error.message);
+        return;
+      }
+      throw error;
     }
 
     const data = rebuildAvcc(nalus);

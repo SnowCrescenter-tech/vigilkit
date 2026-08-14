@@ -8,6 +8,7 @@ import {
   aacTag,
   collect,
   concat,
+  craftTag,
   header,
   metadataTag,
   u24,
@@ -224,6 +225,19 @@ describe('FlvDemuxer', () => {
     // The demuxer is failed: later pushes are inert.
     demuxer.push(concat(header(), videoSeqTag()));
     expect(events).toHaveLength(1);
+    demuxer.close();
+  });
+
+  it('a script tag with a non-string leading AMF value emits a DEMUX error instead of throwing', () => {
+    const demuxer = new FlvDemuxer();
+    const events = collect(demuxer);
+    // Script payload whose first AMF value is a NUMBER (marker 0x00):
+    // parseScriptData rejects a non-string leading name, and the demuxer must
+    // surface that as an error event — never a synchronous throw out of push().
+    const payload = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    expect(() => demuxer.push(concat(header(), craftTag(18, payload)))).not.toThrow();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error', error: { code: 'DEMUX' } });
     demuxer.close();
   });
 

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { HlsError } from '../errors.js';
 import { parseM3u8 } from './parser.js';
 
 describe('parseM3u8', () => {
@@ -113,8 +112,14 @@ seg-0.ts
     expect(playlist.segments[0]?.uri).toBe('seg-0.ts');
   });
 
-  it('throws HlsError when #EXTM3U is missing', () => {
-    expect(() => parseM3u8('#EXT-X-TARGETDURATION:2\n#EXTINF:1.0,\nseg.ts')).toThrow(HlsError);
+  // Pinned behavior: a missing #EXTM3U header must NOT throw — arbitrary or
+  // truncated input is parsed best-effort (the fuzz contract). The tags that
+  // were recognized still take effect; the header itself just goes unmarked.
+  it('a missing #EXTM3U header yields a best-effort playlist instead of throwing', () => {
+    const playlist = parseM3u8('#EXT-X-TARGETDURATION:2\n#EXTINF:1.0,\nseg.ts');
+    expect(playlist.type).toBe('media');
+    expect(playlist.segments).toEqual([{ uri: 'seg.ts', duration: 1 }]);
+    expect(playlist.targetDuration).toBe(2);
   });
 
   describe('#EXT-X-KEY', () => {

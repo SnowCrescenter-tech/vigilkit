@@ -1,6 +1,7 @@
 import { ByteReader, MediaFormatError, ascToConfig, parseAvcC, parseHvcC } from '@vigilkit/media-utils';
 import type { Demuxer, DemuxerEvent, StreamMetadata } from '@vigilkit/plugin-sdk';
 import { parseScriptData } from './amf0.js';
+import { DemuxError } from './errors.js';
 import { ENHANCED_HEADER_SIZE, parseEnhancedHevcHeader, readSi24Cts, unwrapHvccBox } from './hevc.js';
 import type { EnhancedHevcHeader } from './hevc.js';
 import {
@@ -157,7 +158,21 @@ export class FlvDemuxer implements Demuxer {
   }
 
   private processScript(data: Uint8Array): void {
-    const meta = parseScriptData(data);
+    let meta: Record<string, unknown>;
+    try {
+      meta = parseScriptData(data);
+    } catch (error) {
+      // parseScriptData throws DemuxError when the script's leading AMF value
+      // is not a string (e.g. a tag whose payload starts with a number or
+      // boolean marker). Surface it as a DEMUX error event instead of leaking
+      // a synchronous throw out of push().
+      if (error instanceof DemuxError) {
+        this.emitError('DEMUX', error.message);
+        this.failed = true;
+        return;
+      }
+      throw error;
+    }
     const metadata: StreamMetadata = {
       hasAudio: (this.flags & 4) !== 0,
       hasVideo: (this.flags & 1) !== 0,

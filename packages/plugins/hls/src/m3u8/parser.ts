@@ -1,4 +1,3 @@
-import { hlsError } from '../errors.js';
 import type { KeyInfo, Playlist, Segment, Variant } from './types.js';
 
 interface PendingVariant {
@@ -64,15 +63,15 @@ function toOptionalNumber(value: string | undefined): number | undefined {
 
 /**
  * Line-based m3u8 playlist parser. Tolerates a UTF-8 BOM and CRLF line
- * endings. Unknown `#EXT-X-*` tags are ignored. A missing `#EXTM3U` header is
- * a hard error; otherwise even an empty playlist parses to an empty media
- * `Playlist`.
+ * endings. Unknown `#EXT-X-*` tags are ignored. Parsing never throws: a
+ * missing `#EXTM3U` header yields a best-effort empty `Playlist` (garbage or
+ * truncated input must not take down the caller), and so does any other
+ * malformed input.
  */
 export function parseM3u8(text: string): Playlist {
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const lines = body.split(/\r?\n/);
 
-  let headerSeen = false;
   let master = false;
   let endList = false;
   let mediaSequence = 0;
@@ -93,9 +92,7 @@ export function parseM3u8(text: string): Playlist {
     if (line.length === 0) continue;
 
     if (line.startsWith('#')) {
-      if (line === '#EXTM3U') {
-        headerSeen = true;
-      } else if (line.startsWith('#EXT-X-STREAM-INF:')) {
+      if (line.startsWith('#EXT-X-STREAM-INF:')) {
         master = true;
         const attrs = parseAttributes(line.slice('#EXT-X-STREAM-INF:'.length));
         pendingVariant = {
@@ -104,10 +101,11 @@ export function parseM3u8(text: string): Playlist {
         };
       } else if (line.startsWith('#EXTINF:')) {
         const duration = Number.parseFloat(line.slice('#EXTINF:'.length));
-        // A missing/unparseable duration (#EXTINF: with no number) must not
-        // produce a NaN-duration segment: treat it as no pending EXTINF so the
-        // following URI is dropped like any orphan.
-        pendingDuration = Number.isFinite(duration) ? duration : null;
+        // A missing/unparseable duration (#EXTINF: with no number, NaN,
+        // Infinity) must not produce a NaN-duration segment: treat it as no
+        // pending EXTINF so the following URI is dropped like any orphan.
+        // Negative durations are clamped to 0 — garbage, but never a crash.
+        pendingDuration = Number.isFinite(duration) ? Math.max(0, duration) : null;
       } else if (line.startsWith('#EXT-X-BYTERANGE:')) {
         const [lengthText, offsetText] = line.slice('#EXT-X-BYTERANGE:'.length).split('@');
         const length = Number(lengthText);
@@ -152,10 +150,9 @@ export function parseM3u8(text: string): Playlist {
     }
   }
 
-  if (!headerSeen) {
-    throw hlsError('DEMUX', 'missing #EXTM3U header');
-  }
-
+  // A missing #EXTM3U header no longer throws: arbitrary/truncated input must
+  // never take down the caller, so parse whatever the text described. Callers
+  // treat an empty best-effort playlist as unusable.
   return {
     type: master ? 'master' : 'media',
     targetDuration,
